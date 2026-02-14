@@ -5,11 +5,14 @@ use one::display;
 use one::package::{Self, Publisher};
 use one::coin::{Self, Coin};
 use one::transfer_policy::{Self, TransferPolicy};
+use one::clock::{Self, Clock};
 
 // --- Errors ---
 const EPriceTooHigh: u64 = 1;
 const EIncorrectAmount: u64 = 2;
-const TICKET_PRICE: u64 = 100_000_000; // 1 OCT with 9 decimals
+const EAlreadyScanned: u64 = 3;
+const ETicketExpired: u64 = 4;
+const TICKET_PRICE: u64 = 100_000_000; // 0.1 OCT with 9 decimals
 
 // --- The Ticket Asset ---
 public struct Ticket has key, store {
@@ -18,11 +21,23 @@ public struct Ticket has key, store {
     event_name: String,
     seat: String,
     original_price: u64,
+    is_scanned: bool,
+    expires_at: u64,  // Unix timestamp in milliseconds
+    allow_admin_scan: bool,  // Allow admin to scan without owner signature
+}
+
+// --- Check-In Record (Created by Admin when scanning) ---
+public struct CheckInRecord has key, store {
+    id: UID,
+    ticket_id: ID,
+    ticket_owner: address,
+    checked_in_at: u64,
+    checked_in_by: address,
 }
 
 public struct PriceCapRule has drop {}
 public struct TICKET has drop {}
-public struct AdminCap has key { id: UID }
+public struct AdminCap has key, store { id: UID }  // Make it store so it can be used in PTBs
 
 fun init(otw: TICKET, ctx: &mut TxContext) {
     let publisher = package::claim(otw, ctx);
@@ -69,10 +84,14 @@ public fun buy_ticket<COIN>(
     event_name: String,
     seat: String,
     price: u64,
+    clock: &Clock,
     ctx: &mut TxContext
 ) {
     assert!(coin::value(&payment) == price, EIncorrectAmount);
     transfer::public_transfer(payment, @0xe551904e859d3358ca7813622f9ada529ddecd24801a5f6bddb4a521fcb9c940);
+
+    // Ticket valid for 30 days (30 * 24 * 60 * 60 * 1000 milliseconds)
+    let expiration = clock::timestamp_ms(clock) + 2_592_000_000;
 
     let ticket = Ticket {
         id: object::new(ctx),
@@ -80,20 +99,34 @@ public fun buy_ticket<COIN>(
         event_name,
         seat,
         original_price: price,
+        is_scanned: false,
+        expires_at: expiration,
+        allow_admin_scan: true,
     };
     transfer::public_transfer(ticket, ctx.sender());
 }
 
-// --- 3. ENTRY FUNCTION FOR OCT PAYMENTS (Fixed Price: 1 OCT) ---
-// Uses &mut Coin so the frontend only needs a single moveCall (simplest PTB)
-#[allow(lint(self_transfer, public_entry))]
-public entry fun buy_ticket_oct(
-    payment: &mut Coin<0x2::oct::OCT>,
+// --- 3. PUBLIC FUNCTION FOR OCT PAYMENTS (Fixed Price: 0.1 OCT) ---
+// Accepts Coin by value (works with splitCoins in PTB)
+// NOT entry - so it can accept transaction results!
+#[allow(lint(self_transfer))]
+public fun buy_ticket_oct(
+    mut payment: Coin<0x2::oct::OCT>,  // By value
+    clock: &Clock,
     ctx: &mut TxContext
 ) {
-    assert!(coin::value(payment) >= TICKET_PRICE, EIncorrectAmount);
-    let paid = coin::split(payment, TICKET_PRICE, ctx);
-    transfer::public_transfer(paid, @0xe551904e859d3358ca7813622f9ada529ddecd24801a5f6bddb4a521fcb9c940);
+    // Check we have enough
+    assert!(coin::value(&payment) >= TICKET_PRICE, EIncorrectAmount);
+    
+    // Split exact amount for ticket
+    let ticket_payment = coin::split(&mut payment, TICKET_PRICE, ctx);
+    transfer::public_transfer(ticket_payment, @0xe551904e859d3358ca7813622f9ada529ddecd24801a5f6bddb4a521fcb9c940);
+    
+    // Return change to sender
+    transfer::public_transfer(payment, ctx.sender());
+
+    // Ticket valid for 30 days
+    let expiration = clock::timestamp_ms(clock) + 2_592_000_000;
 
     let ticket = Ticket {
         id: object::new(ctx),
@@ -101,6 +134,9 @@ public entry fun buy_ticket_oct(
         event_name: string::utf8(b"TiX-One Event"),
         seat: string::utf8(b"General Admission"),
         original_price: TICKET_PRICE,
+        is_scanned: false,
+        expires_at: expiration,
+        allow_admin_scan: true,  // Allow organizer to scan
     };
     transfer::public_transfer(ticket, ctx.sender());
 }
@@ -114,4 +150,38 @@ public fun verify_resale(
     let paid_amount = transfer_policy::paid(request);
     assert!(paid_amount <= ticket.original_price, EPriceTooHigh);
     transfer_policy::add_receipt(PriceCapRule {}, request);
+}
+
+// --- 5. THE GATEKEEPER: VERIFY AND CHECK-IN ---
+// Admin passes only the ticket ID (not the object itself to avoid ownership conflict)
+// Frontend has already validated: expiration, ownership, and duplicate check-in
+#[allow(lint(public_entry))]
+public entry fun verify_and_check_in(
+    _admin: &AdminCap,
+    ticket_id: ID,  // Just the ID, not the object!
+    ticket_owner: address,  // Owner address passed from frontend
+    clock: &Clock,
+    ctx: &mut TxContext
+) {
+    // Create a check-in record (owned by admin, proves they scanned this ticket)
+    let record = CheckInRecord {
+        id: object::new(ctx),
+        ticket_id: ticket_id,
+        ticket_owner: ticket_owner,
+        checked_in_at: clock::timestamp_ms(clock),
+        checked_in_by: ctx.sender(),
+    };
+    
+    // Transfer record to admin (they keep it as proof of check-in)
+    transfer::public_transfer(record, ctx.sender());
+}
+
+// --- 6. ADMIN FUNCTION: Reset ticket for testing ---
+#[allow(lint(public_entry))]
+public entry fun reset_ticket_scan(
+    _: &AdminCap,
+    ticket: &mut Ticket,
+    _ctx: &mut TxContext
+) {
+    ticket.is_scanned = false;
 }
