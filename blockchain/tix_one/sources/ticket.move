@@ -6,6 +6,8 @@ use one::package::{Self, Publisher};
 use one::coin::{Self, Coin};
 use one::transfer_policy::{Self, TransferPolicy};
 use one::clock::{Self, Clock};
+use one::kiosk::{Self, Kiosk};
+use one::object;
 
 // --- Errors ---
 const EPriceTooHigh: u64 = 1;
@@ -37,19 +39,39 @@ public struct CheckInRecord has key, store {
 
 public struct PriceCapRule has drop {}
 public struct TICKET has drop {}
+
+// --- Custom Event for Global Marketplace Discovery ---
+public struct TicketListedEvent has copy, drop {
+    ticket_id: ID,
+    price: u64,
+    seller: address,
+    event_name: String,
+    artist: String,
+}
 public struct AdminCap has key, store { id: UID }  // Make it store so it can be used in PTBs
 
 fun init(otw: TICKET, ctx: &mut TxContext) {
     let publisher = package::claim(otw, ctx);
-    let keys = vector[string::utf8(b"name"), string::utf8(b"image_url")];
+    
+    // Define display fields for explorer visualization
+    let keys = vector[
+        string::utf8(b"name"),
+        string::utf8(b"description"),
+        string::utf8(b"image_url"),
+        string::utf8(b"link"),
+    ];
+    
     let values = vector[
-        string::utf8(b"TiX-One: {artist}"),
-        string::utf8(b"https://api.dicebear.com/7.x/identicon/svg?seed={id}")
+        string::utf8(b"TiX-One Ticket: {event_name}"),
+        string::utf8(b"Official TiX-One digital ticket for {artist}. Securely verified on-chain."),
+        string::utf8(b"https://api.dicebear.com/7.x/bottts/svg?seed={id}&backgroundColor=b6e3f4"),
+        string::utf8(b"https://tix-one.io/ticket/{id}"),
     ];
 
     let mut display = display::new_with_fields<Ticket>(&publisher, keys, values, ctx);
     display::update_version(&mut display);
 
+    // Transfer objects to admin (ctx.sender)
     transfer::transfer(AdminCap { id: object::new(ctx) }, ctx.sender());
     transfer::public_transfer(display, ctx.sender());
     transfer::public_transfer(publisher, ctx.sender());
@@ -75,7 +97,7 @@ public fun create_transfer_policy(
     transfer::public_transfer(policy_cap, ctx.sender());
 }
 
-// --- 2. THE PRIMARY SALE (Generic Coin) ---
+// --- 3. THE PRIMARY SALE (Generic Coin) ---
 // By adding <COIN>, this function now works with USDC, OCT, or anything else!
 #[allow(lint(self_transfer))]
 public fun buy_ticket<COIN>(
@@ -106,7 +128,7 @@ public fun buy_ticket<COIN>(
     transfer::public_transfer(ticket, ctx.sender());
 }
 
-// --- 3. PUBLIC FUNCTION FOR OCT PAYMENTS (Fixed Price: 0.1 OCT) ---
+// --- 4. PUBLIC FUNCTION FOR OCT PAYMENTS (Fixed Price: 0.1 OCT) ---
 // Accepts Coin by value (works with splitCoins in PTB)
 // NOT entry - so it can accept transaction results!
 #[allow(lint(self_transfer))]
@@ -150,6 +172,24 @@ public fun verify_resale(
     let paid_amount = transfer_policy::paid(request);
     assert!(paid_amount <= ticket.original_price, EPriceTooHigh);
     transfer_policy::add_receipt(PriceCapRule {}, request);
+}
+
+// --- 4B. EMIT TICKET EVENT (Global Marketplace Discovery) ---
+// Emits the custom event BEFORE the ticket is placed in the kiosk
+public fun emit_listing_event(
+    ticket: &Ticket,
+    price: u64,
+    ctx: &mut TxContext
+) {
+    let event = TicketListedEvent {
+        ticket_id: object::id(ticket),
+        price,
+        seller: ctx.sender(),
+        event_name: ticket.event_name,
+        artist: ticket.artist,
+    };
+    
+    one::event::emit(event);
 }
 
 // --- 5. THE GATEKEEPER: VERIFY AND CHECK-IN ---

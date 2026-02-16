@@ -11,7 +11,7 @@ import {
 import { Transaction } from '@mysten/sui/transactions';
 
 // --- CONFIGURATION ---
-const PACKAGE_ID = '0xe5075370b215b27cb71de3dd381d80aa126e61c595ec852c6a40a20d60b5f059';
+const PACKAGE_ID = '0xaab69602cc3fef8fdc9785c38a75508438eb074bf6775bb2e41a921956cf7a3f';
 const OCT_TYPE = '0x2::oct::OCT';
 const CLOCK_OBJECT = '0x6';
 const TICKET_PRICE = 100_000_000n; 
@@ -202,6 +202,12 @@ function Home() {
                                 onClick={() => navigate('/my-ticket')}
                             >
                                 🎫 My Tickets
+                            </button>
+                            <button
+                                className="action-button marketplace"
+                                onClick={() => navigate('/marketplace')}
+                            >
+                                🛍️ Secondary Market
                             </button>
                             <button
                                 className="action-button scanner"

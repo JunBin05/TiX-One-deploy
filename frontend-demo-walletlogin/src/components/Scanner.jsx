@@ -4,8 +4,8 @@ import { useCurrentAccount, useSuiClient, useSignAndExecuteTransaction } from '@
 import { Html5Qrcode } from 'html5-qrcode';
 import { Transaction } from '@mysten/sui/transactions';
 
-const PACKAGE_ID = '0xe5075370b215b27cb71de3dd381d80aa126e61c595ec852c6a40a20d60b5f059';
-const ADMIN_CAP_ID = '0xf5c3d0cd3fea7bc75b837421b5348d4d6521ae219c909a6a0219dd2d55307951';
+const PACKAGE_ID = '0xaab69602cc3fef8fdc9785c38a75508438eb074bf6775bb2e41a921956cf7a3f';
+const ADMIN_CAP_ID = '0xc106e976223521c61c36119468d9b4fdb055cf4df1eff066702050adab6ce05a';
 const CLOCK_OBJECT = '0x6';
 
 function Scanner() {
