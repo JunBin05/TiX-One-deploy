@@ -57,6 +57,46 @@ function Marketplace() {
         return null;
     };
 
+    // Helper: Read active kiosk listing price for a specific ticket
+    const getActiveListingPrice = async (kioskId, ticketId) => {
+        try {
+            const dynamicFields = await suiClient.getDynamicFields({
+                parentId: kioskId,
+                limit: 100
+            });
+
+            const listingField = dynamicFields.data?.find((field) => {
+                const isListingType = field?.name?.type?.includes('0x2::kiosk::Listing');
+                if (!isListingType) return false;
+
+                const rawId = typeof field.name.value === 'string'
+                    ? field.name.value
+                    : field.name.value?.id;
+
+                return rawId === ticketId;
+            });
+
+            if (!listingField) {
+                return null;
+            }
+
+            const listingObj = await suiClient.getDynamicFieldObject({
+                parentId: kioskId,
+                name: listingField.name,
+            });
+
+            const value = listingObj?.data?.content?.fields?.value;
+            if (value === undefined || value === null) {
+                return null;
+            }
+
+            return parseInt(value);
+        } catch (err) {
+            console.log('[Marketplace] Failed to read active listing price:', err);
+            return null;
+        }
+    };
+
     const fetchMarketplaceListings = async () => {
         setIsLoading(true);
         try {
@@ -109,6 +149,22 @@ function Marketplace() {
 
                         const ticketData = ticketObj.data.content.fields;
 
+                        // 4. Require an active listing object in the seller's Kiosk
+                        const activeListingPrice = await getActiveListingPrice(kioskId, ticketId);
+                        if (activeListingPrice === null) {
+                            console.log('[Marketplace] No active kiosk listing found:', ticketId);
+                            processedTickets.add(ticketId);
+                            continue;
+                        }
+
+                        // 5. Enforce face-value visibility in marketplace UI
+                        const originalPrice = parseInt(ticketData.original_price);
+                        if (activeListingPrice > originalPrice) {
+                            console.log('[Marketplace] Overpriced listing filtered out:', ticketId);
+                            processedTickets.add(ticketId);
+                            continue;
+                        }
+
                         listingsArray.push({
                             ticketId: ticketId,
                             kioskId: kioskId,
@@ -116,7 +172,7 @@ function Marketplace() {
                             artist: eventData.artist,
                             seat: ticketData.seat,
                             original_price: ticketData.original_price,
-                            price: parseInt(eventData.price),
+                            price: activeListingPrice,
                             expires_at: ticketData.expires_at,
                             seller: eventData.seller,
                             is_own_listing: isOwnListing(eventData.seller)
@@ -146,6 +202,12 @@ function Marketplace() {
 
         if (listing.is_own_listing) {
             alert('You cannot purchase your own listing.');
+            return;
+        }
+
+        const originalPrice = parseInt(listing.original_price);
+        if (listing.price > originalPrice) {
+            alert('❌ This listing violates face-value policy and is blocked.');
             return;
         }
 

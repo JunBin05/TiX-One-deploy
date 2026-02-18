@@ -18,8 +18,9 @@ function MyTicket() {
     const [kioskOwnerCap, setKioskOwnerCap] = useState(null);
     const [isCreatingKiosk, setIsCreatingKiosk] = useState(false);
     const [isListing, setIsListing] = useState(false);
-    const [listPrice, setListPrice] = useState('');
     const [showListingModal, setShowListingModal] = useState(false);
+    const [listingMode, setListingMode] = useState('public');
+    const [privateLinks, setPrivateLinks] = useState({});
     
     const currentAccount = useCurrentAccount();
     const suiClient = useSuiClient();
@@ -184,47 +185,19 @@ function MyTicket() {
     };
 
     const handleListOnMarketplace = async () => {
-        // Validate price
-        const priceInMist = Math.floor(parseFloat(listPrice) * 1_000_000_000);
-        const originalPrice = parseInt(selectedTicket.original_price);
-
-        if (priceInMist > originalPrice) {
-            alert(`❌ Price too high! Maximum resale price is ${(originalPrice / 1_000_000_000).toFixed(2)} OCT`);
-            return;
-        }
+        const priceInMist = parseInt(selectedTicket.original_price);
 
         setIsListing(true);
         try {
             const tx = new Transaction();
 
-            // Step 1: Emit the discovery event BEFORE locking the ticket in the Kiosk
+            // Single atomic call: check cap + emit event + place/list
             tx.moveCall({
-                target: `${PACKAGE_ID}::ticket::emit_listing_event`,
+                target: `${PACKAGE_ID}::ticket::safe_list_ticket`,
                 arguments: [
+                    tx.object(kiosk.data.objectId),
+                    tx.object(kioskOwnerCap.data.objectId),
                     tx.object(selectedTicket.objectId),
-                    tx.pure.u64(priceInMist)
-                ],
-            });
-
-            // Step 2: Place ticket securely in the Kiosk
-            tx.moveCall({
-                target: '0x2::kiosk::place',
-                typeArguments: [TICKET_TYPE],
-                arguments: [
-                    tx.object(kiosk.data.objectId),
-                    tx.object(kioskOwnerCap.data.objectId),
-                    tx.object(selectedTicket.objectId)
-                ],
-            });
-
-            // Step 3: Set the public list price using the standard Kiosk standard
-            tx.moveCall({
-                target: '0x2::kiosk::list',
-                typeArguments: [TICKET_TYPE],
-                arguments: [
-                    tx.object(kiosk.data.objectId),
-                    tx.object(kioskOwnerCap.data.objectId),
-                    tx.pure.id(selectedTicket.objectId),
                     tx.pure.u64(priceInMist)
                 ],
             });
@@ -235,10 +208,11 @@ function MyTicket() {
                     {
                         onSuccess: async () => {
                             setShowListingModal(false);
-                            setListPrice('');
-                            await new Promise(r => setTimeout(r, 1000));
-                            await fetchTickets();
-                            alert('✅ Ticket listed on global marketplace! It\'s now visible in the Secondary Market.');
+                            setListingMode('public');
+                            setTickets(prev => prev.filter(t => t.objectId !== selectedTicket.objectId));
+                            setSelectedTicket(null);
+                            alert('✅ Ticket listed on global marketplace! Redirecting...');
+                            navigate('/marketplace');
                             resolve();
                         },
                         onError: (error) => {
@@ -252,6 +226,68 @@ function MyTicket() {
         } catch (error) {
             console.error('[MyTicket] Error listing ticket:', error);
             alert('Failed to list ticket. Make sure you have enough OCT for gas fees.');
+        } finally {
+            setIsListing(false);
+        }
+    };
+
+    const copyPrivateLink = async (url) => {
+        try {
+            await navigator.clipboard.writeText(url);
+            alert('Private link copied to clipboard!');
+        } catch (err) {
+            console.error('[MyTicket] Clipboard error:', err);
+            alert(`Private link: ${url}`);
+        }
+    };
+
+    const handlePrivateListing = async () => {
+        const priceInMist = parseInt(selectedTicket.original_price);
+
+        setIsListing(true);
+        try {
+            const tx = new Transaction();
+
+            // Single atomic call: check cap + place/list (no event)
+            tx.moveCall({
+                target: `${PACKAGE_ID}::ticket::safe_private_list_ticket`,
+                arguments: [
+                    tx.object(kiosk.data.objectId),
+                    tx.object(kioskOwnerCap.data.objectId),
+                    tx.object(selectedTicket.objectId),
+                    tx.pure.u64(priceInMist)
+                ],
+            });
+
+            await new Promise((resolve, reject) => {
+                signAndExecuteTransaction(
+                    { transaction: tx },
+                    {
+                        onSuccess: async () => {
+                            setShowListingModal(false);
+                            setListingMode('public');
+                            await new Promise(r => setTimeout(r, 1000));
+                            await fetchTickets();
+
+                            const url = `${window.location.origin}/buy?kiosk=${kiosk.data.objectId}&ticket=${selectedTicket.objectId}&price=${priceInMist}`;
+                            setPrivateLinks(prev => ({
+                                ...prev,
+                                [selectedTicket.objectId]: url
+                            }));
+
+                            resolve();
+                        },
+                        onError: (error) => {
+                            console.error('[MyTicket] Private listing error:', error);
+                            alert('Transaction failed. Check the console for details.');
+                            reject(error);
+                        }
+                    }
+                );
+            });
+        } catch (error) {
+            console.error('[MyTicket] Error creating private listing:', error);
+            alert('Failed to create private listing. Make sure you have enough OCT for gas fees.');
         } finally {
             setIsListing(false);
         }
@@ -419,11 +455,40 @@ function MyTicket() {
                                 <p>Make this ticket available for resale on BlueMove, Tradeport & other Sui marketplaces</p>
                                 <button 
                                     className="vip-button success"
-                                    onClick={() => setShowListingModal(true)}
+                                    onClick={() => {
+                                        setListingMode('public');
+                                        setShowListingModal(true);
+                                    }}
                                     disabled={isListing}
                                 >
                                     📤 List on Global Market
                                 </button>
+                                {!privateLinks[selectedTicket.objectId] ? (
+                                    <button 
+                                        className="vip-button secondary"
+                                        onClick={() => {
+                                            setListingMode('private');
+                                            setShowListingModal(true);
+                                        }}
+                                        disabled={isListing}
+                                    >
+                                        🔗 Create Private Link
+                                    </button>
+                                ) : (
+                                    <div className="private-link-box" style={{ marginTop: '15px', padding: '15px', background: 'rgba(255,255,255,0.5)', borderRadius: '12px', border: '2px dashed #667eea' }}>
+                                        <p style={{ margin: '0 0 10px 0', fontSize: '0.9rem', color: '#666', fontWeight: 'bold' }}>✅ Private Link Ready!</p>
+                                        <div className="address-display" style={{ padding: '10px' }}>
+                                            <code style={{ fontSize: '0.75rem' }}>{privateLinks[selectedTicket.objectId]}</code>
+                                            <button
+                                                onClick={() => copyPrivateLink(privateLinks[selectedTicket.objectId])}
+                                                className="copy-btn"
+                                                title="Copy link"
+                                            >
+                                                📋
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         )}
 
@@ -436,31 +501,32 @@ function MyTicket() {
             )}
 
             {showListingModal && (
-                <div className="modal-overlay" onClick={() => !isListing && setShowListingModal(false)}>
+                <div className="modal-overlay" onClick={() => {
+                    if (!isListing) {
+                        setShowListingModal(false);
+                        setListingMode('public');
+                    }
+                }}>
                     <div className="modal-content" onClick={e => e.stopPropagation()}>
-                        <h2>💰 Set Resale Price</h2>
-                        <p>Original purchase price: <strong>{(parseInt(selectedTicket.original_price) / 1_000_000_000).toFixed(2)} OCT</strong></p>
-                        <p className="small-text">⚠️ Maximum resale price is <strong>{(parseInt(selectedTicket.original_price) / 1_000_000_000).toFixed(2)} OCT</strong></p>
-                        
-                        <div className="modal-input">
-                            <label>Resale Price (OCT)</label>
-                            <input
-                                type="number"
-                                min="0"
-                                step="0.001"
-                                max={(parseInt(selectedTicket.original_price) / 1_000_000_000).toFixed(2)}
-                                value={listPrice}
-                                onChange={(e) => setListPrice(e.target.value)}
-                                placeholder={`Max: ${(parseInt(selectedTicket.original_price) / 1_000_000_000).toFixed(2)}`}
-                            />
+                        <h2>{listingMode === 'private' ? '🔗 Create Private Link' : '🌐 List on Market'}</h2>
+                        <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '12px', margin: '20px 0', border: '1px solid #e2e8f0' }}>
+                            <p style={{ margin: '0 0 10px 0', color: '#64748b', fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 'bold' }}>
+                                Fixed Resale Price
+                            </p>
+                            <p style={{ margin: 0, color: '#0f172a', fontSize: '2rem', fontWeight: '800' }}>
+                                {(parseInt(selectedTicket.original_price) / 1_000_000_000).toFixed(2)} OCT
+                            </p>
                         </div>
+                        <p style={{ color: '#475569', fontSize: '0.95rem', lineHeight: '1.5', marginBottom: '20px' }}>
+                            To prevent scalping, TiX-One enforces a strict face-value resale policy. This ticket will be securely listed for exactly what you paid for it.
+                        </p>
 
                         <div className="modal-actions">
                             <button 
                                 className="modal-button cancel"
                                 onClick={() => {
                                     setShowListingModal(false);
-                                    setListPrice('');
+                                    setListingMode('public');
                                 }}
                                 disabled={isListing}
                             >
@@ -468,10 +534,10 @@ function MyTicket() {
                             </button>
                             <button 
                                 className="modal-button confirm"
-                                onClick={handleListOnMarketplace}
-                                disabled={isListing || !listPrice}
+                                onClick={listingMode === 'private' ? handlePrivateListing : handleListOnMarketplace}
+                                disabled={isListing}
                             >
-                                {isListing ? 'Listing...' : 'Confirm Listing'}
+                                {isListing ? 'Listing...' : listingMode === 'private' ? 'Create Private Link' : 'List at Face Value'}
                             </button>
                         </div>
                     </div>

@@ -504,7 +504,7 @@ body {
 .vip-button {
   padding: 14px 32px;
   font-size: 1rem;
-  font-weight: 600;
+  font-weight: 700;
   border-radius: 12px;
   border: none;
   cursor: pointer;
@@ -513,27 +513,47 @@ body {
 }
 
 .vip-button.primary {
-  background: #667eea;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
   box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
 }
 
-.vip-button.primary:hover {
-  background: #5568d3;
+.vip-button.primary:hover:not(:disabled) {
   transform: translateY(-2px);
   box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
 }
 
-.vip-button.secondary {
-  background: transparent;
-  color: #667eea;
-  border: 2px solid #667eea;
+.vip-button.success {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: white;
+  box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);
 }
 
-.vip-button.secondary:hover {
-  background: #667eea;
-  color: white;
+.vip-button.success:hover:not(:disabled) {
   transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(16, 185, 129, 0.5);
+}
+
+.vip-button.secondary {
+  background: #f1f5f9;
+  color: #334155;
+  border: 2px solid #cbd5e1;
+}
+
+.vip-button.secondary:hover:not(:disabled) {
+  background: #e2e8f0;
+  color: #0f172a;
+  transform: translateY(-2px);
+}
+
+.vip-button:disabled {
+  background: #e2e8f0 !important;
+  color: #94a3b8 !important;
+  border: 2px solid #e2e8f0 !important;
+  cursor: not-allowed;
+  box-shadow: none !important;
+  transform: none !important;
+  opacity: 1 !important;
 }
 
 .button-group {
@@ -1078,27 +1098,38 @@ body {
   color: #ef4444;
   margin: 1rem 0;
 }
-/* ===== MARKETPLACE ACTIONS ===== */
+/* ===== TICKET & ACTION CARDS ===== */
+.ticket-card {
+  background: #ffffff;
+  border-radius: 20px;
+  padding: 40px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+  max-width: 600px;
+  margin: 0 auto;
+}
+
 .action-section {
   margin-top: 2rem;
-  padding: 20px;
-  background: rgba(102, 126, 234, 0.1);
-  border-radius: 12px;
-  border: 2px solid rgba(102, 126, 234, 0.3);
+  padding: 25px;
+  background: #f8fafc;
+  border-radius: 16px;
+  border: 2px solid #e2e8f0;
   text-align: center;
 }
 
 .action-section h3 {
-  font-size: 1.3rem;
-  color: #667eea;
+  font-size: 1.4rem;
+  color: #0f172a;
   margin-bottom: 0.5rem;
+  font-weight: 800;
 }
 
 .action-section p {
   font-size: 0.95rem;
-  color: #666;
-  margin-bottom: 1rem;
-  line-height: 1.5;
+  color: #475569;
+  margin-bottom: 1.5rem;
+  line-height: 1.6;
+  font-weight: 500;
 }
 
 .action-section .vip-button {
@@ -1352,18 +1383,18 @@ body {
 }
 
 .marketplace-card {
-  background: white;
+  background: #ffffff;
   border-radius: 20px;
   padding: 25px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.2);
   transition: all 0.3s ease;
-  border: 2px solid transparent;
+  border: 2px solid #dbeafe;
 }
 
 .marketplace-card:hover {
   transform: translateY(-5px);
-  box-shadow: 0 8px 30px rgba(102, 126, 234, 0.2);
-  border-color: rgba(102, 126, 234, 0.3);
+  box-shadow: 0 14px 40px rgba(37, 99, 235, 0.25);
+  border-color: #93c5fd;
 }
 
 .marketplace-card-header {
@@ -1376,7 +1407,7 @@ body {
 }
 
 .marketplace-card-header h3 {
-  color: #333;
+  color: #0f172a;
   font-size: 1.3rem;
   margin: 0;
   flex: 1;
@@ -1407,12 +1438,13 @@ body {
 }
 
 .detail-row .label {
-  color: #999;
+  color: #475569;
   font-size: 0.9rem;
+  font-weight: 600;
 }
 
 .detail-row .value {
-  color: #333;
+  color: #0f172a;
   font-weight: 600;
   font-size: 0.95rem;
 }
@@ -1423,7 +1455,8 @@ body {
   justify-content: space-between;
   gap: 15px;
   padding: 20px;
-  background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%);
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
   border-radius: 12px;
   margin: 1.5rem 0;
 }
@@ -1438,9 +1471,10 @@ body {
 
 .price-label {
   font-size: 0.75rem;
-  color: #999;
+  color: #475569;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  font-weight: 700;
 }
 
 .price-value {
@@ -1449,12 +1483,12 @@ body {
 }
 
 .price-value.original {
-  color: #999;
+  color: #64748b;
   text-decoration: line-through;
 }
 
 .price-value.resale {
-  color: #667eea;
+  color: #2563eb;
 }
 
 .price-arrow {
@@ -1464,13 +1498,14 @@ body {
 }
 
 .verified-badge {
-  background: linear-gradient(135deg, rgba(34, 197, 94, 0.1) 0%, rgba(16, 185, 129, 0.1) 100%);
-  color: #16a34a;
+  background: #ecfdf5;
+  border: 1px solid #86efac;
+  color: #166534;
   padding: 10px;
   border-radius: 8px;
   text-align: center;
   font-size: 0.9rem;
-  font-weight: 600;
+  font-weight: 700;
   margin-bottom: 1rem;
 }
 
@@ -1533,8 +1568,8 @@ body {
 
 /* ===== GLOBAL MARKETPLACE ENHANCEMENTS ===== */
 .marketplace-card.own-listing {
-  border: 2px solid #667eea;
-  background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%);
+  border: 2px solid #2563eb;
+  background: #ffffff;
 }
 
 .listing-badge.own {
@@ -1551,21 +1586,22 @@ body {
   gap: 10px;
   padding: 12px;
   margin-bottom: 1rem;
-  background: linear-gradient(135deg, rgba(102, 126, 234, 0.08) 0%, rgba(118, 75, 162, 0.08) 100%);
+  background: #eff6ff;
   border-radius: 10px;
-  border-left: 3px solid #667eea;
+  border: 1px solid #bfdbfe;
+  border-left: 4px solid #2563eb;
 }
 
 .seller-info-prominent .seller-label {
   font-size: 0.9rem;
-  color: #666;
+  color: #334155;
   font-weight: 600;
 }
 
 .seller-info-prominent .seller-address {
   font-size: 0.85rem;
-  color: #667eea;
-  background: rgba(102, 126, 234, 0.15);
+  color: #1d4ed8;
+  background: #dbeafe;
   padding: 5px 10px;
   border-radius: 6px;
   font-family: monospace;
@@ -1579,12 +1615,4 @@ body {
   font-weight: 600;
 }
 
-.vip-button.secondary {
-  background: #9ca3af;
-  cursor: not-allowed;
-}
 
-.vip-button.secondary:hover {
-  transform: none;
-  box-shadow: none;
-}

@@ -215,12 +215,6 @@ function Home() {
                             >
                                 📸 Scanner
                             </button>
-                            <button
-                                className="action-button vip"
-                                onClick={() => navigate('/vip')}
-                            >
-                                🎭 VIP Entrance
-                            </button>
                         </div>
 
                         <ConnectButton className="logout-button" />

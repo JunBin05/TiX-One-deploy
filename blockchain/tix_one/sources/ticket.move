@@ -192,6 +192,39 @@ public fun emit_listing_event(
     one::event::emit(event);
 }
 
+// --- 4C. PUBLIC SAFE LISTING ---
+public fun safe_list_ticket(
+    kiosk: &mut Kiosk,
+    cap: &one::kiosk::KioskOwnerCap,
+    ticket: Ticket,
+    price: u64,
+    ctx: &mut TxContext
+) {
+    // 1. The Ultimate Block: Crash the transaction if price > original
+    assert!(price <= ticket.original_price, EPriceTooHigh);
+
+    // 2. Emit the event for the Marketplace to discover
+    emit_listing_event(&ticket, price, ctx);
+
+    // 3. Securely place and list the ticket
+    one::kiosk::place_and_list(kiosk, cap, ticket, price);
+}
+
+// --- 4D. PRIVATE SAFE LISTING (No Event) ---
+public fun safe_private_list_ticket(
+    kiosk: &mut Kiosk,
+    cap: &one::kiosk::KioskOwnerCap,
+    ticket: Ticket,
+    price: u64,
+    _ctx: &mut TxContext
+) {
+    // 1. Prevent scalping on private links too!
+    assert!(price <= ticket.original_price, EPriceTooHigh);
+
+    // 2. Place and list without emitting the discovery event
+    one::kiosk::place_and_list(kiosk, cap, ticket, price);
+}
+
 // --- 5. THE GATEKEEPER: VERIFY AND CHECK-IN ---
 // Admin passes only the ticket ID (not the object itself to avoid ownership conflict)
 // Frontend has already validated: expiration, ownership, and duplicate check-in
