@@ -5,6 +5,8 @@ import MyTicket from "./pages/MyTicket";
 import Marketplace from "./pages/Marketplace";
 import Scanner from "./pages/Scanner";
 import Checkout from "./pages/Checkout";
+import BotDetected from "./pages/BotDetected";
+import Appeal from "./pages/Appeal";
 
 export const router = createBrowserRouter([
   {
@@ -30,5 +32,13 @@ export const router = createBrowserRouter([
   {
     path: "/buy",
     Component: Checkout,
+  },
+  {
+    path: "/bot-detected",
+    Component: BotDetected,
+  },
+  {
+    path: "/appeal",
+    Component: Appeal,
   },
 ]);

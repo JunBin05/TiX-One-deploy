@@ -1,4 +1,4 @@
-import { useParams, Link } from "react-router";
+import { useParams, Link, useNavigate } from "react-router";
 import { concerts } from "../data/concerts";
 import {
   Calendar,
@@ -13,6 +13,7 @@ import { useAuth } from "../context/AuthContext";
 import { PopBackground } from "../components/PopBackground";
 import { ConnectButton } from "@mysten/dapp-kit";
 import { useBuyTicket } from "../onechain/useBuyTicket";
+import DelbotVerification from "../components/DelbotVerification";
 
 export default function ConcertDetail() {
   const { id } = useParams();
@@ -23,6 +24,8 @@ export default function ConcertDetail() {
   >(null);
   const { isSpotifyConnected, connectSpotify } = useAuth();
   const { buyTicketAtPrice, isBuying, buyError, buyDigest, isConnected } = useBuyTicket();
+  const [showDelbot, setShowDelbot] = useState(false);
+  const navigate = useNavigate();
 
   const parseConcertPriceMist = (priceLabel: string): bigint => {
     const raw = String(priceLabel ?? "")
@@ -68,6 +71,13 @@ export default function ConcertDetail() {
       return;
     }
 
+    // Show Delbot verification before proceeding with purchase
+    setShowDelbot(true);
+  };
+
+  const proceedWithPurchase = () => {
+    setShowDelbot(false);
+
     let priceMist: bigint;
     try {
       priceMist = parseConcertPriceMist(concert?.price || "");
@@ -87,6 +97,11 @@ export default function ConcertDetail() {
         if (shouldRedirect) window.location.assign("/my-ticket");
       }
     });
+  };
+
+  const handleBotDetected = () => {
+    setShowDelbot(false);
+    navigate("/bot-detected");
   };
 
   const handleAuthorizeFan = () => {
@@ -288,6 +303,16 @@ export default function ConcertDetail() {
           </div>
         </div>
       </div>
+
+      {/* Delbot Verification Modal */}
+      {showDelbot && (
+        <DelbotVerification
+          minDataPoints={50}
+          onHumanVerified={proceedWithPurchase}
+          onBotDetected={handleBotDetected}
+          onCancel={() => setShowDelbot(false)}
+        />
+      )}
 
       {/* Authentication Modal */}
       {showAuthModal && (
