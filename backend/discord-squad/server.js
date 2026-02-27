@@ -298,6 +298,25 @@ const FRONTEND_URL          = process.env.FRONTEND_URL || 'http://127.0.0.1:3000
 
 const SPOTIFY_SCOPES = 'user-top-read user-read-recently-played';
 
+// Mirror of src/data/concerts.ts — keep in sync when adding concerts.
+const CONCERTS = [
+  { id: '1',  artist: 'Avicii' },
+  { id: '2',  artist: 'Jay Chou' },
+  { id: '3',  artist: 'Digital Pulse' },
+  { id: '4',  artist: 'Acoustic Souls' },
+  { id: '5',  artist: 'Rhythm Chain' },
+  { id: '6',  artist: 'Stellar Harmony' },
+  { id: '7',  artist: 'The Jazz Collective' },
+  { id: '8',  artist: 'Thunder Road' },
+  { id: '9',  artist: 'Symphony Orchestra Berlin' },
+  { id: '10', artist: 'Wildfire Country Band' },
+  { id: '11', artist: 'Iron Legion' },
+  { id: '12', artist: 'Reggae Vibes' },
+  { id: '13', artist: 'Fuego Latino' },
+  { id: '14', artist: 'Cyber Beat' },
+  { id: '15', artist: 'Delta Blues Legends' },
+];
+
 /**
  * GET /auth-url?eventId=1&artistName=Jay+Chou
  * Returns the Spotify OAuth URL. State encodes eventId|artistName.
@@ -322,6 +341,24 @@ app.get('/auth-url', (req, res) => {
 });
 
 /**
+ * GET /auth-url-global
+ * Returns Spotify OAuth URL for global fan-check (all concerts at once).
+ */
+app.get('/auth-url-global', (req, res) => {
+  if (!SPOTIFY_CLIENT_ID || !SPOTIFY_REDIRECT_URI) {
+    return res.status(500).json({ error: 'Spotify credentials not configured' });
+  }
+  const url =
+    `https://accounts.spotify.com/authorize` +
+    `?client_id=${SPOTIFY_CLIENT_ID}` +
+    `&response_type=code` +
+    `&redirect_uri=${encodeURIComponent(SPOTIFY_REDIRECT_URI)}` +
+    `&scope=${encodeURIComponent(SPOTIFY_SCOPES)}` +
+    `&state=global`;
+  res.json({ url });
+});
+
+/**
  * GET /callback?code=X&state=eventId|artistName
  * Exchanges code, scores the user, redirects to frontend with ?score=N.
  */
@@ -336,22 +373,25 @@ app.get('/callback', async (req, res) => {
     return res.status(400).send('Missing code or state');
   }
 
+  const decoded  = decodeURIComponent(String(state));
+  const isGlobal = decoded === 'global';
+
   let eventId, artistName;
-  try {
-    const decoded = decodeURIComponent(String(state));
-    const pipeIdx = decoded.indexOf('|');
-    eventId    = decoded.slice(0, pipeIdx);
-    artistName = decodeURIComponent(decoded.slice(pipeIdx + 1));
-  } catch {
-    return res.status(400).send('Malformed state parameter');
+  if (!isGlobal) {
+    try {
+      const pipeIdx = decoded.indexOf('|');
+      eventId    = decoded.slice(0, pipeIdx);
+      artistName = decodeURIComponent(decoded.slice(pipeIdx + 1));
+    } catch {
+      return res.status(400).send('Malformed state parameter');
+    }
+    if (!eventId || !artistName) {
+      return res.status(400).send('Missing eventId or artistName in state');
+    }
   }
 
-  if (!eventId || !artistName) {
-    return res.status(400).send('Missing eventId or artistName in state');
-  }
-
   try {
-    // 1. Exchange authorization code for access token.
+    // Exchange authorization code for access token.
     const tokenRes = await axios.post(
       'https://accounts.spotify.com/api/token',
       new URLSearchParams({
@@ -364,57 +404,55 @@ app.get('/callback', async (req, res) => {
       { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } },
     );
     const accessToken = tokenRes.data.access_token;
-
-    const spotifyGet = (url) =>
+    const spotifyGet  = (url) =>
       axios.get(url, { headers: { Authorization: `Bearer ${accessToken}` } });
 
-    let score = 0;
-    const target = artistName.toLowerCase();
+    // Fetch all three signals in parallel — one round-trip regardless of global/per-concert.
+    const [topArtistsRes, topTracksRes, recentRes] = await Promise.all([
+      spotifyGet('https://api.spotify.com/v1/me/top/artists?time_range=long_term&limit=50'),
+      spotifyGet('https://api.spotify.com/v1/me/top/tracks?time_range=long_term&limit=50'),
+      spotifyGet('https://api.spotify.com/v1/me/player/recently-played?limit=50'),
+    ]);
+    const topArtists  = topArtistsRes.data.items || [];
+    const topTracks   = topTracksRes.data.items  || [];
+    const recentItems = recentRes.data.items     || [];
 
-    // ── 50%: Long-term top artists ────────────────────────────────────────────
-    const topArtistsRes = await spotifyGet(
-      'https://api.spotify.com/v1/me/top/artists?time_range=long_term&limit=50',
-    );
-    const topArtists = topArtistsRes.data.items || [];
-    const artistRank = topArtists.findIndex(
-      (a) => a.name.toLowerCase() === target,
-    );
     console.log(`[spotify] top-artists (${topArtists.length}):`, topArtists.slice(0, 5).map(a => a.name));
-    console.log(`[spotify] "${target}" artist rank: ${artistRank}`);
-    if (artistRank >= 0 && artistRank < 5)        score += 50; // top 5
-    else if (artistRank >= 5 && artistRank < 20)  score += 35; // top 20
-    else if (artistRank >= 20 && artistRank < 50) score += 20; // top 50
 
-    // ── 40%: Long-term track variety ─────────────────────────────────────────
-    const topTracksRes = await spotifyGet(
-      'https://api.spotify.com/v1/me/top/tracks?time_range=long_term&limit=50',
-    );
-    const topTracks = topTracksRes.data.items || [];
-    const uniqueArtistTracks = topTracks.filter((t) =>
-      t.artists.some((a) => a.name.toLowerCase() === target),
-    ).length;
-    console.log(`[spotify] top-tracks (${topTracks.length}), matching "${target}": ${uniqueArtistTracks}`);
-    score += Math.min(uniqueArtistTracks * 8, 40);
+    /** 50/40/10 score for a single artist name */
+    const scoreFor = (name) => {
+      const t = name.toLowerCase();
+      let s = 0;
+      const rank = topArtists.findIndex(a => a.name.toLowerCase() === t);
+      if (rank >= 0 && rank < 5)        s += 50;
+      else if (rank >= 5 && rank < 20)  s += 35;
+      else if (rank >= 20 && rank < 50) s += 20;
+      s += Math.min(topTracks.filter(tr => tr.artists.some(a => a.name.toLowerCase() === t)).length * 8, 40);
+      s += Math.min(recentItems.filter(i => i.track.artists.some(a => a.name.toLowerCase() === t)).length * 2, 10);
+      return s;
+    };
 
-    // ── 10%: Immediate hype (recently played) ────────────────────────────────
-    const recentRes = await spotifyGet(
-      'https://api.spotify.com/v1/me/player/recently-played?limit=50',
-    );
-    const recentItems = recentRes.data.items || [];
-    const recentCount = recentItems.filter((item) =>
-      item.track.artists.some((a) => a.name.toLowerCase() === target),
-    ).length;
-    console.log(`[spotify] recently-played (${recentItems.length}), matching "${target}": ${recentCount}`);
-    score += Math.min(recentCount * 2, 10);
-
-    console.log(`[spotify] FINAL eventId=${eventId} artist="${artistName}" score=${score}/100`);
-
-    // Redirect to concert page with score — frontend will clean up the URL.
-    return res.redirect(`${FRONTEND_URL}/concert/${eventId}?score=${score}`);
+    if (isGlobal) {
+      // Check every concert and bundle all scores into a single redirect.
+      const scores = {};
+      for (const c of CONCERTS) {
+        scores[c.id] = scoreFor(c.artist);
+        console.log(`[spotify-global] "${c.artist}" (id=${c.id}) score=${scores[c.id]}`);
+      }
+      const fanScoresStr = Object.entries(scores).map(([id, s]) => `${id}:${s}`).join(',');
+      return res.redirect(`${FRONTEND_URL}/?fan_scores=${encodeURIComponent(fanScoresStr)}`);
+    } else {
+      const score = scoreFor(artistName);
+      console.log(`[spotify] FINAL eventId=${eventId} artist="${artistName}" score=${score}/100`);
+      return res.redirect(`${FRONTEND_URL}/concert/${eventId}?score=${score}`);
+    }
 
   } catch (err) {
     console.error('[spotify] callback error', err?.response?.data || err.message);
-    return res.redirect(`${FRONTEND_URL}/concert/${eventId}?score=0&spotify_error=1`);
+    const fallback = isGlobal
+      ? `${FRONTEND_URL}/?spotify_error=1`
+      : `${FRONTEND_URL}/concert/${eventId}?score=0&spotify_error=1`;
+    return res.redirect(fallback);
   }
 });
 

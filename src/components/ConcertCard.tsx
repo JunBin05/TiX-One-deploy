@@ -1,12 +1,14 @@
 import { Link } from "react-router";
 import { Concert } from "../data/concerts";
-import { Calendar, MapPin, Ticket } from "lucide-react";
+import { Calendar, MapPin, Ticket, ShieldCheck } from "lucide-react";
 
 interface ConcertCardProps {
   concert: Concert;
+  fanScore?: number;
 }
 
-export function ConcertCard({ concert }: ConcertCardProps) {
+export function ConcertCard({ concert, fanScore }: ConcertCardProps) {
+  const isVerifiedFan = fanScore !== undefined && fanScore >= 60;
   return (
     <Link
       to={`/concert/${concert.id}`}
@@ -24,7 +26,15 @@ export function ConcertCard({ concert }: ConcertCardProps) {
         <div className="absolute top-4 right-4 bg-gradient-to-r from-pink-600 to-purple-600 text-white px-4 py-2 rounded-full text-sm backdrop-blur-sm shadow-lg neon-border">
           {concert.price}
         </div>
-        
+
+        {/* Verified Fan badge */}
+        {isVerifiedFan && (
+          <div className="absolute top-4 left-4 flex items-center gap-1.5 bg-green-600/90 backdrop-blur-sm text-white px-3 py-1.5 rounded-full text-xs font-semibold shadow-lg border border-green-400/60">
+            <ShieldCheck className="w-3.5 h-3.5" />
+            Verified Fan
+          </div>
+        )}
+
         {/* Neon glow effect on hover */}
         <div className="absolute inset-0 bg-pink-600/0 group-hover:bg-pink-600/10 transition-all duration-300" />
       </div>

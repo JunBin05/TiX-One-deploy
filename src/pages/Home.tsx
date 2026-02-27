@@ -8,13 +8,26 @@ import { Link } from "react-router";
 import { useState, useMemo, useEffect } from "react";
 import { useCurrentAccount, useSuiClient } from "@mysten/dapp-kit";
 import { ADMIN_CAP_ID } from "../onechain/config";
+import { useAuth } from "../context/AuthContext";
 
 const CONCERTS_PER_PAGE = 6;
 
 export default function Home() {
   const currentAccount = useCurrentAccount();
   const suiClient = useSuiClient();
+  const { fanScores, storeFanScores } = useAuth();
   const [isOrganizer, setIsOrganizer] = useState(false);
+
+  // Read ?fan_scores=1:72,2:0,... injected by Spotify OAuth callback
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const raw = params.get('fan_scores');
+    if (raw) {
+      storeFanScores(raw);
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -256,7 +269,11 @@ export default function Home() {
           <>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8">
               {currentConcerts.map((concert) => (
-                <ConcertCard key={concert.id} concert={concert} />
+                <ConcertCard
+                  key={concert.id}
+                  concert={concert}
+                  fanScore={fanScores[concert.id]}
+                />
               ))}
             </div>
 

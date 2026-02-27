@@ -25,7 +25,7 @@ export default function ConcertDetail() {
   const [authType, setAuthType] = useState<
     "onechain" | "spotify" | null
   >(null);
-  const { isSpotifyConnected } = useAuth();
+  const { isSpotifyConnected, fanScores } = useAuth();
   const { buyTicketAtPrice, isBuying, buyError, buyDigest, isConnected } = useBuyTicket();
   const [showDelbot, setShowDelbot] = useState(false);
   const [pendingPurchaseType, setPendingPurchaseType] = useState<"fan" | "public" | null>(null);
@@ -44,7 +44,17 @@ export default function ConcertDetail() {
     return () => clearInterval(id);
   }, []);
 
-  // ── Read ?score= from URL after Spotify callback, clean URL ───────────────
+  // ── Pre-verify from global Spotify check (done on homepage) ─────────────
+  useEffect(() => {
+    if (!concert) return;
+    const stored = fanScores[concert.id];
+    if (stored !== undefined) {
+      setFanScore(stored);
+      if (stored >= 60) setIsFanVerified(true);
+    }
+  }, [concert, fanScores]);
+
+  // ── Read ?score= from URL after per-concert Spotify callback, clean URL ───
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const scoreStr = params.get("score");

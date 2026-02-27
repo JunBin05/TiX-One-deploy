@@ -1,26 +1,10 @@
-import { Wallet, Music, LogOut } from "lucide-react";
+import { Music, LogOut, Loader2, RefreshCw } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
-import { useState } from "react";
 import { ConnectButton, useCurrentAccount } from "@mysten/dapp-kit";
 
 export function AuthButtons() {
-  const { isSpotifyConnected, connectSpotify, disconnectSpotify } = useAuth();
+  const { isSpotifyConnected, spotifyLoading, connectSpotify, disconnectSpotify } = useAuth();
   const currentAccount = useCurrentAccount();
-  
-  const [showSpotifyModal, setShowSpotifyModal] = useState(false);
-
-  const handleSpotifyClick = () => {
-    if (isSpotifyConnected) {
-      disconnectSpotify();
-    } else {
-      setShowSpotifyModal(true);
-    }
-  };
-
-  const handleSpotifyConnect = () => {
-    connectSpotify();
-    setShowSpotifyModal(false);
-  };
 
   return (
     <>
@@ -33,66 +17,36 @@ export function AuthButtons() {
           }`}
         />
 
+        {/* Main Spotify button: connect / re-check */}
         <button
-          onClick={handleSpotifyClick}
+          onClick={connectSpotify}
+          disabled={spotifyLoading}
           className={`flex items-center gap-2 px-5 py-2.5 rounded-lg transition-all duration-200 text-sm shadow-lg ${
             isSpotifyConnected
               ? "bg-gradient-to-r from-green-600 to-emerald-600 text-white hover:from-green-700 hover:to-emerald-700"
               : "bg-green-900/50 backdrop-blur-sm border-2 border-green-500 text-white hover:bg-green-800/60 hover:border-green-400"
-          }`}
+          } disabled:opacity-60 disabled:cursor-not-allowed`}
         >
-          {isSpotifyConnected ? (
-            <>
-              <LogOut className="w-4 h-4" />
-              <span>Disconnect Spotify</span>
-            </>
+          {spotifyLoading ? (
+            <><Loader2 className="w-4 h-4 animate-spin" /><span>Connecting…</span></>
+          ) : isSpotifyConnected ? (
+            <><RefreshCw className="w-4 h-4" /><span>Re-check Fan Status</span></>
           ) : (
-            <>
-              <Music className="w-4 h-4" />
-              <span>Connect Spotify</span>
-            </>
+            <><Music className="w-4 h-4" /><span>Connect Spotify</span></>
           )}
         </button>
+
+        {/* Disconnect (only shown when connected) */}
+        {isSpotifyConnected && (
+          <button
+            onClick={disconnectSpotify}
+            className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-red-900/30 border border-red-500/40 text-red-300 hover:bg-red-900/50 text-xs transition-all"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span>Disconnect</span>
+          </button>
+        )}
       </div>
-
-      {/* Spotify Modal */}
-      {showSpotifyModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-gradient-to-br from-purple-950 to-indigo-950 border-2 border-green-500/50 rounded-2xl max-w-md w-full p-6 md:p-8 shadow-2xl mx-auto">
-            <div className="text-center mb-6">
-              <div className="w-16 h-16 bg-green-600/30 border-2 border-green-500 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Music className="w-8 h-8 text-green-300" />
-              </div>
-              <h3 className="text-2xl text-white mb-2 neon-text">
-                Connect with Spotify
-              </h3>
-              <p className="text-base text-pink-300">
-                Verify your fan status by connecting your Spotify account
-              </p>
-            </div>
-
-            <div className="space-y-3">
-              <button
-                onClick={handleSpotifyConnect}
-                className="w-full bg-gradient-to-r from-green-600 to-emerald-600 text-white py-3 px-6 rounded-xl hover:from-green-700 hover:to-emerald-700 transition-all duration-200 text-base shadow-lg"
-              >
-                Connect Spotify
-              </button>
-              
-              <button
-                onClick={() => setShowSpotifyModal(false)}
-                className="w-full bg-purple-900/50 border-2 border-pink-500/50 text-white py-3 px-6 rounded-xl hover:bg-purple-800/60 hover:border-pink-400 transition-all duration-200 text-base neon-border"
-              >
-                Cancel
-              </button>
-            </div>
-
-            <p className="text-xs text-pink-400 text-center mt-4 bg-purple-950/30 rounded-lg p-2 border border-pink-500/30">
-              Authentication will be handled by the backend
-            </p>
-          </div>
-        </div>
-      )}
     </>
   );
 }
