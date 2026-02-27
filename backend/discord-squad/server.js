@@ -238,8 +238,8 @@ app.post('/api/create-squad', async (req, res) => {
           // The "Invisible Trigger" telling the AI to speak first
           const initialPrompt = `${systemInstruction}\n\n=== CHAT HISTORY ===\nSystem: A new squad room was just created. The first human ticket holder has entered the room, but hasn't spoken yet. You are the AI Concierge. Speak first! Welcome them to the ${concert.title} squad, hype them up, and ask a fun icebreaker question to find out their concert vibe.\n\nConcierge (You):`;
 
-          const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-          const result = await withGeminiRetry(() => model.generateContent(initialPrompt));
+          const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+          const result = await model.generateContent(initialPrompt);
           const reply = result.response.text().trim();
 
           // Send the AI's custom icebreaker!
@@ -286,8 +286,8 @@ app.post('/api/create-squad', async (req, res) => {
   }
 });
 
-const server = app.listen(PORT, '127.0.0.1', () => {
-  console.log(`[api] listening on http://127.0.0.1:${PORT}`);
+const server = app.listen(PORT, () => {
+  console.log(`[api] listening on http://localhost:${PORT}`);
 });
 
 server.on('error', (err) => {
@@ -310,45 +310,6 @@ const PROMPT_PATH = path.join(__dirname, 'prompt.md');
 
 // Per-channel expense ledger (in-memory; resets on server restart).
 const expenseLedger = new Map(); // channelId → [{payer, amount, description}]
-
-// Per-channel cooldown — prevents burst requests from spamming the AI quota.
-const channelCooldown = new Map(); // channelId → timestamp of last AI response
-const COOLDOWN_MS = 4000; // 4 s between AI responses per channel
-
-/**
- * Retry a Gemini call up to `maxRetries` times, honouring the retryDelay
- * from 429 responses. Falls back to exponential backoff if no delay hint.
- */
-async function withGeminiRetry(fn, maxRetries = 2) {
-  let lastErr;
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      return await fn();
-    } catch (err) {
-      lastErr = err;
-      if (err?.status !== 429) throw err; // only retry rate-limit errors
-      if (attempt === maxRetries) break;
-
-      // Parse retryDelay from error details (e.g. "51s" → 51000 ms).
-      let delayMs = Math.pow(2, attempt + 1) * 1000; // fallback: 2s, 4s
-      try {
-        const retryInfo = err.errorDetails?.find(
-          (d) => d['@type']?.endsWith('RetryInfo'),
-        );
-        if (retryInfo?.retryDelay) {
-          const secs = parseInt(retryInfo.retryDelay, 10);
-          if (!isNaN(secs)) delayMs = secs * 1000;
-        }
-      } catch { /* ignore parse errors */ }
-
-      // Cap wait at 60 s so Discord doesn't drop the typing indicator context.
-      delayMs = Math.min(delayMs, 60_000);
-      console.warn(`[ai] 429 rate-limit — retrying in ${delayMs / 1000}s (attempt ${attempt + 1}/${maxRetries})`);
-      await new Promise((r) => setTimeout(r, delayMs));
-    }
-  }
-  throw lastErr;
-}
 
 // ── Tool API implementations ──────────────────────────────────────────────────
 
@@ -684,12 +645,6 @@ client.on('messageCreate', async (message) => {
   if (!message.channel.name.startsWith('squad-')) return;
   if (!genAI) return;
 
-  // Per-channel cooldown — drop the event if we responded too recently.
-  const now = Date.now();
-  const lastAt = channelCooldown.get(message.channel.id) || 0;
-  if (now - lastAt < COOLDOWN_MS) return;
-  channelCooldown.set(message.channel.id, now);
-
   try {
     // Extract ConcertID from the channel topic.
     const topic    = message.channel.topic || '';
@@ -731,10 +686,10 @@ client.on('messageCreate', async (message) => {
     await message.channel.sendTyping();
 
     // Initialise a chat session with the full toolbox.
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash', tools: SQUAD_TOOLS });
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash', tools: SQUAD_TOOLS });
     const chat  = model.startChat();
 
-    let result   = await withGeminiRetry(() => chat.sendMessage(finalPrompt));
+    let result   = await chat.sendMessage(finalPrompt);
     let response = result.response;
 
     // ── Multi-turn function-calling loop (max 4 rounds) ───────────────────
@@ -761,7 +716,7 @@ client.on('messageCreate', async (message) => {
       );
 
       // Send tool results back to Gemini for synthesis.
-      result   = await withGeminiRetry(() => chat.sendMessage(functionResponses));
+      result   = await chat.sendMessage(functionResponses);
       response = result.response;
     }
     // ── End function-calling loop ─────────────────────────────────────────
