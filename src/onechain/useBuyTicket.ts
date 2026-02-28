@@ -12,11 +12,7 @@ import {
   TICKET_PRICE_MIST,
 } from "./config";
 
-type TicketMetadata = {
-  artist: string;
-  eventName: string;
-  seat: string;
-};
+
 
 export function useBuyTicket() {
   const currentAccount = useCurrentAccount();
@@ -73,7 +69,8 @@ export function useBuyTicket() {
 
   const buyTicketAtPrice = async (
     priceMist: bigint,
-    metadata?: TicketMetadata
+    concertObjectId: string,
+    seat = "General Admission"
   ) => {
     setBuyError("");
     setBuyDigest("");
@@ -86,6 +83,10 @@ export function useBuyTicket() {
       setBuyError("Ticket price must be greater than 0.");
       return null;
     }
+    if (!concertObjectId) {
+      setBuyError("Concert not linked to blockchain yet. Please try again shortly.");
+      return null;
+    }
 
     setIsBuying(true);
     try {
@@ -95,25 +96,16 @@ export function useBuyTicket() {
 
       const [tempCoin] = tx.splitCoins(tx.gas, [tx.pure.u64(priceMist)]);
 
-      if (metadata) {
-        tx.moveCall({
-          target: `${PACKAGE_ID}::ticket::buy_ticket`,
-          typeArguments: [OCT_TYPE],
-          arguments: [
-            tempCoin,
-            tx.pure.string(metadata.artist),
-            tx.pure.string(metadata.eventName),
-            tx.pure.string(metadata.seat),
-            tx.pure.u64(priceMist),
-            tx.object(CLOCK_OBJECT_ID),
-          ],
-        });
-      } else {
-        tx.moveCall({
-          target: `${PACKAGE_ID}::ticket::buy_ticket_oct_at_price`,
-          arguments: [tempCoin, tx.pure.u64(priceMist), tx.object(CLOCK_OBJECT_ID)],
-        });
-      }
+      tx.moveCall({
+        target: `${PACKAGE_ID}::ticket::buy_ticket_oct_at_price`,
+        arguments: [
+          tx.object(concertObjectId),  // &mut Concert — enforces supply cap
+          tempCoin,
+          tx.pure.string(seat),
+          tx.pure.u64(priceMist),
+          tx.object(CLOCK_OBJECT_ID),
+        ],
+      });
 
       const result = await signAndExecuteTransaction({ transaction: tx });
 

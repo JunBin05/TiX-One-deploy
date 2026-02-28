@@ -11,14 +11,27 @@ use one::dynamic_field;
 use one::object;
 
 // --- Errors ---
-const EPriceTooHigh: u64 = 1;
-const EIncorrectAmount: u64 = 2;
-const EAlreadyScanned: u64 = 3;
-const ETicketExpired: u64 = 4;
-const EListingNotApproved: u64 = 5;
-const EListingPriceMismatch: u64 = 6;
-const EListingSourceMismatch: u64 = 7;
+const EPriceTooHigh: u64 = 0;
+const EIncorrectAmount: u64 = 1;
+const EAlreadyScanned: u64 = 2;
+const ETicketExpired: u64 = 3;
+const EListingNotApproved: u64 = 4;
+const EListingPriceMismatch: u64 = 5;
+const EListingSourceMismatch: u64 = 6;
+const ESoldOut: u64 = 7;
+
 const TICKET_PRICE: u64 = 100_000_000; // 0.1 OCT with 9 decimals
+
+// =========================================================
+// --- Concert Registry (Shared Object, one per event) ---
+// =========================================================
+public struct Concert has key {
+    id: UID,
+    artist: String,
+    event_name: String,
+    max_supply: u64,
+    tickets_sold: u64,
+}
 
 // --- The Ticket Asset ---
 public struct Ticket has key, store {
@@ -58,7 +71,8 @@ public struct TicketListedEvent has copy, drop {
     event_name: String,
     artist: String,
 }
-public struct AdminCap has key, store { id: UID }  // Make it store so it can be used in PTBs
+
+public struct AdminCap has key, store { id: UID }
 
 fun init(otw: TICKET, ctx: &mut TxContext) {
     let publisher = package::claim(otw, ctx);
@@ -88,7 +102,38 @@ fun init(otw: TICKET, ctx: &mut TxContext) {
     transfer::share_object(ListingRegistry { id: object::new(ctx) });
 }
 
-// --- 1. SETTING THE LAW ---
+// =========================================================
+// --- 1. CONCERT REGISTRY: Create a per-event supply cap ---
+// =========================================================
+/// Admin-only: create a shared Concert object that governs how many
+/// tickets can ever be minted for this specific event.
+public fun create_concert(
+    _: &AdminCap,
+    artist: String,
+    event_name: String,
+    max_supply: u64,
+    ctx: &mut TxContext,
+) {
+    let concert = Concert {
+        id: object::new(ctx),
+        artist,
+        event_name,
+        max_supply,
+        tickets_sold: 0,
+    };
+    // Share so buyers (and the frontend PTB) can mutably reference it.
+    transfer::share_object(concert);
+}
+
+// --- Convenience read-only accessors ---
+public fun concert_artist(c: &Concert): String { c.artist }
+public fun concert_event_name(c: &Concert): String { c.event_name }
+public fun concert_max_supply(c: &Concert): u64 { c.max_supply }
+public fun concert_tickets_sold(c: &Concert): u64 { c.tickets_sold }
+
+// =========================================================
+// --- 2. SETTING THE LAW (Transfer Policy) ---
+// =========================================================
 #[allow(lint(share_owned, self_transfer))]
 public fun create_transfer_policy(
     _: &AdminCap, 
@@ -108,28 +153,32 @@ public fun create_transfer_policy(
     transfer::public_transfer(policy_cap, ctx.sender());
 }
 
-// --- 3. THE PRIMARY SALE (Generic Coin) ---
-// By adding <COIN>, this function now works with USDC, OCT, or anything else!
+// =========================================================
+// --- 3. PRIMARY SALE: Generic Coin (with Concert cap) ---
+// =========================================================
 #[allow(lint(self_transfer))]
 public fun buy_ticket<COIN>(
+    concert: &mut Concert,
     payment: Coin<COIN>,
-    artist: String,
-    event_name: String,
     seat: String,
     price: u64,
     clock: &Clock,
     ctx: &mut TxContext
 ) {
+    assert!(concert.tickets_sold < concert.max_supply, ESoldOut);
     assert!(coin::value(&payment) == price, EIncorrectAmount);
+
     transfer::public_transfer(payment, @0xe551904e859d3358ca7813622f9ada529ddecd24801a5f6bddb4a521fcb9c940);
+
+    concert.tickets_sold = concert.tickets_sold + 1;
 
     // Ticket valid for 30 days (30 * 24 * 60 * 60 * 1000 milliseconds)
     let expiration = clock::timestamp_ms(clock) + 2_592_000_000;
 
     let ticket = Ticket {
         id: object::new(ctx),
-        artist,
-        event_name,
+        artist: concert.artist,
+        event_name: concert.event_name,
         seat,
         original_price: price,
         is_scanned: false,
@@ -139,50 +188,55 @@ public fun buy_ticket<COIN>(
     transfer::public_transfer(ticket, ctx.sender());
 }
 
-// --- 4. PUBLIC FUNCTION FOR OCT PAYMENTS (Fixed Price: 0.1 OCT) ---
-// Accepts Coin by value (works with splitCoins in PTB)
-// NOT entry - so it can accept transaction results!
+// =========================================================
+// --- 4. PRIMARY SALE: OCT fixed price (with Concert cap) ---
+// =========================================================
 #[allow(lint(self_transfer))]
 public fun buy_ticket_oct(
-    mut payment: Coin<0x2::oct::OCT>,  // By value
+    concert: &mut Concert,
+    mut payment: Coin<0x2::oct::OCT>,
     clock: &Clock,
     ctx: &mut TxContext
 ) {
-    // Check we have enough
+    assert!(concert.tickets_sold < concert.max_supply, ESoldOut);
     assert!(coin::value(&payment) >= TICKET_PRICE, EIncorrectAmount);
     
-    // Split exact amount for ticket
     let ticket_payment = coin::split(&mut payment, TICKET_PRICE, ctx);
     transfer::public_transfer(ticket_payment, @0xe551904e859d3358ca7813622f9ada529ddecd24801a5f6bddb4a521fcb9c940);
     
     // Return change to sender
     transfer::public_transfer(payment, ctx.sender());
 
-    // Ticket valid for 30 days
+    concert.tickets_sold = concert.tickets_sold + 1;
+
     let expiration = clock::timestamp_ms(clock) + 2_592_000_000;
 
     let ticket = Ticket {
         id: object::new(ctx),
-        artist: string::utf8(b"TiX-One Artist"),
-        event_name: string::utf8(b"TiX-One Event"),
+        artist: concert.artist,
+        event_name: concert.event_name,
         seat: string::utf8(b"General Admission"),
         original_price: TICKET_PRICE,
         is_scanned: false,
         expires_at: expiration,
-        allow_admin_scan: true,  // Allow organizer to scan
+        allow_admin_scan: true,
     };
     transfer::public_transfer(ticket, ctx.sender());
 }
 
-// --- 4A. PRIMARY SALE (OCT, VARIABLE PRICE) ---
-// Allows the frontend to set the primary-sale price dynamically.
+// =========================================================
+// --- 5. PRIMARY SALE: OCT variable price (with Concert cap) ---
+// =========================================================
 #[allow(lint(self_transfer))]
 public fun buy_ticket_oct_at_price(
+    concert: &mut Concert,
     mut payment: Coin<0x2::oct::OCT>,
+    seat: String,
     price: u64,
     clock: &Clock,
     ctx: &mut TxContext
 ) {
+    assert!(concert.tickets_sold < concert.max_supply, ESoldOut);
     assert!(coin::value(&payment) >= price, EIncorrectAmount);
 
     let ticket_payment = coin::split(&mut payment, price, ctx);
@@ -191,14 +245,15 @@ public fun buy_ticket_oct_at_price(
     // Return change to sender
     transfer::public_transfer(payment, ctx.sender());
 
-    // Ticket valid for 30 days
+    concert.tickets_sold = concert.tickets_sold + 1;
+
     let expiration = clock::timestamp_ms(clock) + 2_592_000_000;
 
     let ticket = Ticket {
         id: object::new(ctx),
-        artist: string::utf8(b"TiX-One Artist"),
-        event_name: string::utf8(b"TiX-One Event"),
-        seat: string::utf8(b"General Admission"),
+        artist: concert.artist,
+        event_name: concert.event_name,
+        seat,
         original_price: price,
         is_scanned: false,
         expires_at: expiration,
@@ -207,7 +262,9 @@ public fun buy_ticket_oct_at_price(
     transfer::public_transfer(ticket, ctx.sender());
 }
 
-// --- 4. THE RESALE ENFORCER ---
+// =========================================================
+// --- 6. RESALE ENFORCER ---
+// =========================================================
 public fun verify_resale(
     _policy: &mut TransferPolicy<Ticket>,
     request: &mut transfer_policy::TransferRequest<Ticket>,
@@ -248,8 +305,9 @@ fun upsert_listing_approval(
     );
 }
 
-// --- 4B. EMIT TICKET EVENT (Global Marketplace Discovery) ---
-// Emits the custom event BEFORE the ticket is placed in the kiosk
+// =========================================================
+// --- 7. EMIT TICKET EVENT (Global Marketplace Discovery) ---
+// =========================================================
 public fun emit_listing_event(
     ticket: &Ticket,
     price: u64,
@@ -262,11 +320,12 @@ public fun emit_listing_event(
         event_name: ticket.event_name,
         artist: ticket.artist,
     };
-    
     one::event::emit(event);
 }
 
-// --- 4C. PUBLIC SAFE LISTING ---
+// =========================================================
+// --- 8. PUBLIC SAFE LISTING (Global Marketplace) ---
+// =========================================================
 public fun safe_list_ticket(
     kiosk: &mut Kiosk,
     cap: &one::kiosk::KioskOwnerCap,
@@ -275,21 +334,20 @@ public fun safe_list_ticket(
     registry: &mut ListingRegistry,
     ctx: &mut TxContext
 ) {
-    // 1. The Ultimate Block: Crash the transaction if price > original
     assert!(price <= ticket.original_price, EPriceTooHigh);
 
     let ticket_id = object::id(&ticket);
     let kiosk_id = object::id(kiosk);
     upsert_listing_approval(registry, ticket_id, kiosk_id, price);
 
-    // 2. Emit the event for the Marketplace to discover
     emit_listing_event(&ticket, price, ctx);
 
-    // 3. Securely place and list the ticket
     one::kiosk::place_and_list(kiosk, cap, ticket, price);
 }
 
-// --- 4D. PRIVATE SAFE LISTING (No Event) ---
+// =========================================================
+// --- 9. PRIVATE SAFE LISTING (No Discovery Event) ---
+// =========================================================
 public fun safe_private_list_ticket(
     kiosk: &mut Kiosk,
     cap: &one::kiosk::KioskOwnerCap,
@@ -298,29 +356,26 @@ public fun safe_private_list_ticket(
     registry: &mut ListingRegistry,
     _ctx: &mut TxContext
 ) {
-    // 1. Prevent scalping on private links too!
     assert!(price <= ticket.original_price, EPriceTooHigh);
 
     let ticket_id = object::id(&ticket);
     let kiosk_id = object::id(kiosk);
     upsert_listing_approval(registry, ticket_id, kiosk_id, price);
 
-    // 2. Place and list without emitting the discovery event
     one::kiosk::place_and_list(kiosk, cap, ticket, price);
 }
 
-// --- 5. THE GATEKEEPER: VERIFY AND CHECK-IN ---
-// Admin passes only the ticket ID (not the object itself to avoid ownership conflict)
-// Frontend has already validated: expiration, ownership, and duplicate check-in
+// =========================================================
+// --- 10. THE GATEKEEPER: VERIFY AND CHECK-IN ---
+// =========================================================
 #[allow(lint(public_entry))]
 public entry fun verify_and_check_in(
     _admin: &AdminCap,
-    ticket_id: ID,  // Just the ID, not the object!
-    ticket_owner: address,  // Owner address passed from frontend
+    ticket_id: ID,
+    ticket_owner: address,
     clock: &Clock,
     ctx: &mut TxContext
 ) {
-    // Create a check-in record (owned by admin, proves they scanned this ticket)
     let record = CheckInRecord {
         id: object::new(ctx),
         ticket_id: ticket_id,
@@ -328,12 +383,12 @@ public entry fun verify_and_check_in(
         checked_in_at: clock::timestamp_ms(clock),
         checked_in_by: ctx.sender(),
     };
-    
-    // Transfer record to admin (they keep it as proof of check-in)
     transfer::public_transfer(record, ctx.sender());
 }
 
-// --- 6. ADMIN FUNCTION: Reset ticket for testing ---
+// =========================================================
+// --- 11. ADMIN: Reset ticket scan for testing ---
+// =========================================================
 #[allow(lint(public_entry))]
 public entry fun reset_ticket_scan(
     _: &AdminCap,

@@ -1,5 +1,5 @@
 import { useParams, Link, useNavigate, useLocation } from "react-router";
-import { concerts } from "../data/concerts";
+import { useConcertById } from "../hooks/useConcerts";
 import {
   Calendar,
   MapPin,
@@ -20,7 +20,7 @@ import DelbotVerification from "../components/DelbotVerification";
 
 export default function ConcertDetail() {
   const { id } = useParams();
-  const concert = concerts.find((c) => c.id === id);
+  const { concert, loading: concertLoading } = useConcertById(id);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authType, setAuthType] = useState<
     "onechain" | "spotify" | null
@@ -93,6 +93,14 @@ export default function ConcertDetail() {
   const fanSaleOpen    = currentTime >= fanSaleTime;
   const publicSaleOpen = currentTime >= publicSaleTime;
 
+  // ── Modal auto-close when wallet connects ─────────────────────────────────
+  useEffect(() => {
+    if (showAuthModal && authType === "onechain" && isConnected) {
+      setShowAuthModal(false);
+      setAuthType(null);
+    }
+  }, [showAuthModal, authType, isConnected]);
+
   const parseConcertPriceMist = (priceLabel: string): bigint => {
     const raw = String(priceLabel ?? "")
       .trim()
@@ -130,6 +138,20 @@ export default function ConcertDetail() {
       setSpotifyLoading(false);
     }
   }, [concert]);
+
+  if (concertLoading) {
+    return (
+      <div className="min-h-screen relative overflow-hidden flex items-center justify-center">
+        <PopBackground />
+        <div className="concert-lights" />
+        <div className="fixed inset-0 bg-gradient-to-br from-purple-900 via-indigo-900 to-blue-900 animate-lights -z-10" />
+        <div className="text-center relative z-10">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-pink-500 mx-auto mb-4" />
+          <p className="text-pink-200">Loading concert…</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!concert) {
     return (
@@ -182,20 +204,22 @@ export default function ConcertDetail() {
     setShowDelbot(false);
     setPendingPurchaseType(null);
 
+    if (!concert.concert_object_id) {
+      alert("This concert is not yet linked to the blockchain. Please contact the organizer.");
+      return;
+    }
+
+    // Parse price from the OCT string label (e.g. "0.06 OCT")
     let priceMist: bigint;
     try {
-      priceMist = parseConcertPriceMist(concert?.price || "");
+      priceMist = parseConcertPriceMist(concert.price || "");
       if (priceMist <= 0n) throw new Error("Concert price must be greater than 0.");
     } catch (e: any) {
       alert(e?.message || "Invalid concert price");
       return;
     }
 
-    buyTicketAtPrice(priceMist, {
-      artist: concert.artist,
-      eventName: concert.title,
-      seat: "General Admission",
-    }).then((digest) => {
+    buyTicketAtPrice(priceMist, concert.concert_object_id, "General Admission").then((digest) => {
       if (digest) {
         const shouldRedirect = window.confirm("Ticket minted! Go to My Tickets now?");
         if (shouldRedirect) window.location.assign("/my-ticket");
@@ -213,12 +237,6 @@ export default function ConcertDetail() {
     setShowAuthModal(false);
     setAuthType(null);
   };
-
-  useEffect(() => {
-    if (showAuthModal && authType === "onechain" && isConnected) {
-      closeModal();
-    }
-  }, [showAuthModal, authType, isConnected]);
 
   return (
     <div className="min-h-screen relative overflow-hidden">

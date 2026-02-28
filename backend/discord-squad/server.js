@@ -298,24 +298,44 @@ const FRONTEND_URL          = process.env.FRONTEND_URL || 'http://127.0.0.1:3000
 
 const SPOTIFY_SCOPES = 'user-top-read user-read-recently-played';
 
-// Mirror of src/data/concerts.ts — keep in sync when adding concerts.
-const CONCERTS = [
-  { id: '1',  artist: 'Avicii' },
-  { id: '2',  artist: 'Jay Chou' },
-  { id: '3',  artist: 'Digital Pulse' },
-  { id: '4',  artist: 'Acoustic Souls' },
-  { id: '5',  artist: 'Rhythm Chain' },
-  { id: '6',  artist: 'Stellar Harmony' },
-  { id: '7',  artist: 'The Jazz Collective' },
-  { id: '8',  artist: 'Thunder Road' },
-  { id: '9',  artist: 'Symphony Orchestra Berlin' },
-  { id: '10', artist: 'Wildfire Country Band' },
-  { id: '11', artist: 'Iron Legion' },
-  { id: '12', artist: 'Reggae Vibes' },
-  { id: '13', artist: 'Fuego Latino' },
-  { id: '14', artist: 'Cyber Beat' },
-  { id: '15', artist: 'Delta Blues Legends' },
-];
+// ── Dynamic concert list — fetched from Supabase, cached for 5 minutes ───────
+const SUPABASE_URL      = process.env.SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
+
+// Static fallback (used when Supabase is unreachable)
+const CONCERTS_FALLBACK = concerts.map((c) => ({ id: c.id, artist: c.artist }));
+
+let _concertsCache     = null;
+let _concertsCacheTime = 0;
+const CACHE_TTL_MS     = 5 * 60 * 1000; // 5 minutes
+
+async function getConcerts() {
+  if (_concertsCache && Date.now() - _concertsCacheTime < CACHE_TTL_MS) {
+    return _concertsCache;
+  }
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+    console.warn('[concerts] SUPABASE_URL/SUPABASE_ANON_KEY not set — using static fallback');
+    return CONCERTS_FALLBACK;
+  }
+  try {
+    const res = await axios.get(`${SUPABASE_URL}/rest/v1/concerts`, {
+      params: { select: 'id,artist', order: 'id.asc' },
+      headers: {
+        apikey:        SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      },
+    });
+    const data = res.data;
+    if (!Array.isArray(data) || data.length === 0) throw new Error('empty response');
+    _concertsCache     = data.map((c) => ({ id: String(c.id), artist: c.artist }));
+    _concertsCacheTime = Date.now();
+    console.log(`[concerts] loaded ${_concertsCache.length} concerts from Supabase`);
+    return _concertsCache;
+  } catch (err) {
+    console.warn('[concerts] Supabase fetch failed, using static fallback:', err?.message);
+    return CONCERTS_FALLBACK;
+  }
+}
 
 /**
  * GET /auth-url?eventId=1&artistName=Jay+Chou
@@ -405,17 +425,25 @@ app.get('/callback', async (req, res) => {
     );
     const accessToken = tokenRes.data.access_token;
     const spotifyGet  = (url) =>
-      axios.get(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+      axios.get(url, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        timeout: 10_000, // 10 s — don't hang forever
+      });
 
-    // Fetch all three signals in parallel — one round-trip regardless of global/per-concert.
-    const [topArtistsRes, topTracksRes, recentRes] = await Promise.all([
+    // Use allSettled so a timeout on one signal doesn't crash the whole callback.
+    const [topArtistsResult, topTracksResult, recentResult] = await Promise.allSettled([
       spotifyGet('https://api.spotify.com/v1/me/top/artists?time_range=long_term&limit=50'),
       spotifyGet('https://api.spotify.com/v1/me/top/tracks?time_range=long_term&limit=50'),
       spotifyGet('https://api.spotify.com/v1/me/player/recently-played?limit=50'),
     ]);
-    const topArtists  = topArtistsRes.data.items || [];
-    const topTracks   = topTracksRes.data.items  || [];
-    const recentItems = recentRes.data.items     || [];
+
+    if (topArtistsResult.status === 'rejected') console.warn('[spotify] top-artists failed:', topArtistsResult.reason?.message);
+    if (topTracksResult.status  === 'rejected') console.warn('[spotify] top-tracks failed:',  topTracksResult.reason?.message);
+    if (recentResult.status     === 'rejected') console.warn('[spotify] recently-played failed (non-fatal):', recentResult.reason?.message);
+
+    const topArtists  = topArtistsResult.status === 'fulfilled' ? (topArtistsResult.value.data.items || []) : [];
+    const topTracks   = topTracksResult.status  === 'fulfilled' ? (topTracksResult.value.data.items  || []) : [];
+    const recentItems = recentResult.status      === 'fulfilled' ? (recentResult.value.data.items     || []) : [];
 
     console.log(`[spotify] top-artists (${topArtists.length}):`, topArtists.slice(0, 5).map(a => a.name));
 
@@ -434,8 +462,9 @@ app.get('/callback', async (req, res) => {
 
     if (isGlobal) {
       // Check every concert and bundle all scores into a single redirect.
+      const concertList = await getConcerts();
       const scores = {};
-      for (const c of CONCERTS) {
+      for (const c of concertList) {
         scores[c.id] = scoreFor(c.artist);
         console.log(`[spotify-global] "${c.artist}" (id=${c.id}) score=${scores[c.id]}`);
       }
@@ -448,7 +477,7 @@ app.get('/callback', async (req, res) => {
     }
 
   } catch (err) {
-    console.error('[spotify] callback error', err?.response?.data || err.message);
+    console.error('[spotify] callback error', err?.response?.data || err?.message || err);
     const fallback = isGlobal
       ? `${FRONTEND_URL}/?spotify_error=1`
       : `${FRONTEND_URL}/concert/${eventId}?score=0&spotify_error=1`;

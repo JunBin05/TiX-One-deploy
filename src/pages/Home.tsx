@@ -1,8 +1,8 @@
-import { concerts } from "../data/concerts";
 import { ConcertCard } from "../components/ConcertCard";
 import { Pagination } from "../components/Pagination";
 import { AuthButtons } from "../components/AuthButtons";
 import { PopBackground } from "../components/PopBackground";
+import { useConcerts } from "../hooks/useConcerts";
 import { Ticket, Filter } from "lucide-react";
 import { Link } from "react-router";
 import { useState, useMemo, useEffect } from "react";
@@ -17,6 +17,7 @@ export default function Home() {
   const suiClient = useSuiClient();
   const { fanScores, storeFanScores } = useAuth();
   const [isOrganizer, setIsOrganizer] = useState(false);
+  const { concerts, loading: concertsLoading } = useConcerts();
 
   // Read ?fan_scores=1:72,2:0,... injected by Spotify OAuth callback
   useEffect(() => {
@@ -60,21 +61,21 @@ export default function Home() {
       })
     );
     return Array.from(uniqueMonths).sort();
-  }, []);
+  }, [concerts]);
 
   const regions = useMemo(() => {
     const uniqueRegions = new Set(concerts.map((concert) => concert.region));
     return Array.from(uniqueRegions).sort();
-  }, []);
+  }, [concerts]);
 
   const artistOrigins = useMemo(() => {
     const uniqueOrigins = new Set(concerts.map((concert) => concert.artistOrigin));
     return Array.from(uniqueOrigins).sort();
-  }, []);
+  }, [concerts]);
 
   // Filter concerts
   const filteredConcerts = useMemo(() => {
-    return concerts.filter((concert) => {
+    return concerts.filter((concert: any) => {
       const concertMonth = new Date(concert.date).toLocaleDateString("en-US", {
         month: "long",
         year: "numeric",
@@ -87,7 +88,7 @@ export default function Home() {
 
       return monthMatch && regionMatch && originMatch;
     });
-  }, [selectedMonth, selectedRegion, selectedArtistOrigin]);
+  }, [concerts, selectedMonth, selectedRegion, selectedArtistOrigin]);
 
   // Calculate pagination
   const totalPages = Math.ceil(filteredConcerts.length / CONCERTS_PER_PAGE);
@@ -265,7 +266,13 @@ export default function Home() {
         </div>
 
         {/* Concert Grid */}
-        {currentConcerts.length > 0 ? (
+        {concertsLoading ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="rounded-2xl border border-pink-500/20 bg-purple-900/30 animate-pulse h-80" />
+            ))}
+          </div>
+        ) : currentConcerts.length > 0 ? (
           <>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8">
               {currentConcerts.map((concert) => (
