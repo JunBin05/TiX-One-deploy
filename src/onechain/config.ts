@@ -28,6 +28,9 @@ export const ADMIN_CAP_ID =
 // Concert shared-object type (for getObject / queryEvents filters)
 export const CONCERT_TYPE = `${PACKAGE_ID}::ticket::Concert` as const;
 
+// Waitlist object type (for on-chain queue queries)
+export const WAITLIST_TYPE = `${PACKAGE_ID}::ticket::Waitlist` as const;
+
 // Backend verifier — set automatically by scripts/3-init-verifier.sh
 // Run: bash scripts/1-deploy.sh && bash scripts/3-init-verifier.sh
 export const BACKEND_VERIFIER_ID =

@@ -148,7 +148,8 @@ export function useBuyTicket() {
     priceMist: bigint,
     concertObjectId: string,
     signatureHex: string,
-    seat = "Fan Presale"
+    seat = "Fan Presale",
+    quantity = 1
   ) => {
     setBuyError("");
     setBuyDigest("");
@@ -181,7 +182,8 @@ export function useBuyTicket() {
       tx.setSender(currentAccount.address);
       tx.setGasBudget(100_000_000);
 
-      const [tempCoin] = tx.splitCoins(tx.gas, [tx.pure.u64(priceMist)]);
+      const total = priceMist * BigInt(quantity);
+      const [tempCoin] = tx.splitCoins(tx.gas, [tx.pure.u64(total)]);
 
       tx.moveCall({
         target: `${PACKAGE_ID}::ticket::buy_verified_fan_ticket`,
@@ -191,7 +193,8 @@ export function useBuyTicket() {
           tx.pure(bcs.vector(bcs.U8).serialize(sigBytes)), // signature: vector<u8>
           tempCoin,                            // payment coin
           tx.pure.string(seat),
-          tx.pure.u64(priceMist),
+          tx.pure.u64(priceMist),              // unit price
+          tx.pure.u64(quantity),               // quantity
           tx.object(CLOCK_OBJECT_ID),
         ],
       });

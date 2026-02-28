@@ -27,7 +27,7 @@ export default function ConcertDetail() {
     "onechain" | "spotify" | null
   >(null);
   const { isSpotifyConnected, fanScores } = useAuth();
-  const { buyTicketAtPrice, buyVerifiedFanTicket, isBuying, buyError, buyDigest, isConnected } = useBuyTicket();
+  const { buyTicketAtPrice, buyVerifiedFanTicket, joinWaitlist, isBuying, buyError, buyDigest, isConnected } = useBuyTicket();
   const [showDelbot, setShowDelbot] = useState(false);
   const [pendingPurchaseType, setPendingPurchaseType] = useState<"fan" | "public" | null>(null);
   const [quantity, setQuantity] = useState(1);
@@ -393,11 +393,11 @@ export default function ConcertDetail() {
               </p>
             </div>
 
-            {/* Action Buttons — Dual Countdown */}
+            {/* Action Buttons — Dual Countdown or Sold-Out Waitlist */}
             <div className="space-y-4">
 
               {/* Fan score badge (shown after Spotify callback) */}
-              {fanScore !== null && (
+              {fanScore !== null && concert.availableTickets > 0 && (
                 <div className={`flex items-center gap-2 rounded-xl px-4 py-2 border-2 text-sm ${
                   isFanVerified
                     ? "bg-green-900/40 border-green-500/60 text-green-300"
@@ -410,75 +410,122 @@ export default function ConcertDetail() {
                 </div>
               )}
 
-              {/* ── Button 1: Fan Presale (5-min head start) ── */}
-              <div>
-                <button
-                  onClick={handleFanPresale}
-                  disabled={!fanSaleOpen || isBuying || spotifyLoading}
-                  className={`w-full py-4 px-6 rounded-xl flex items-center justify-center gap-3 text-base transition-all duration-200 shadow-lg neon-border
-                    ${ fanSaleOpen && isFanVerified
-                        ? "bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white hover:shadow-green-500/50"
-                        : fanSaleOpen && !isFanVerified
-                        ? "bg-gradient-to-r from-yellow-600 to-orange-600 hover:from-yellow-700 hover:to-orange-700 text-white"
-                        : "bg-purple-900/40 border-pink-500/30 text-pink-400 cursor-not-allowed opacity-70"
-                    } disabled:opacity-60 disabled:cursor-not-allowed`}
-                >
-                  {!fanSaleOpen ? (
-                    <><Lock className="w-5 h-5" /> Fan Presale opens in {formatCountdown(fanSaleTime)}</>
-                  ) : isFanVerified ? (
-                    <><ShieldCheck className="w-5 h-5" /> Fan Presale — Buy Now (Verified ✓)</>
-                  ) : spotifyLoading ? (
-                    <><Clock className="w-5 h-5 animate-spin" /> Connecting to Spotify…</>
-                  ) : (
-                    <><Music className="w-5 h-5" /> Fan Presale — Verify with Spotify</>
-                  )}
-                </button>
-                {fanSaleOpen && !isFanVerified && (
-                  <p className="text-xs text-yellow-300/70 mt-1 text-center">
-                    Scores 60+ get presale access. Your long-term listening history is checked.
-                  </p>
-                )}
-              </div>
-
-              {/* ── Quantity Selector (public sale only) ── */}
-              {publicSaleOpen && (
-                <div className="flex items-center justify-between bg-purple-950/40 border-2 border-pink-500/30 rounded-xl px-4 py-3 neon-border">
-                  <span className="text-pink-200 text-sm font-medium">Quantity</span>
-                  <div className="flex items-center gap-3">
-                    <button
-                      onClick={() => setQuantity(q => Math.max(1, q - 1))}
-                      className="w-8 h-8 rounded-full bg-purple-800 hover:bg-purple-700 text-white text-lg font-bold flex items-center justify-center transition-colors"
-                    >−</button>
-                    <span className="text-white font-bold w-6 text-center">{quantity}</span>
-                    <button
-                      onClick={() => setQuantity(q => Math.min(10, q + 1))}
-                      className="w-8 h-8 rounded-full bg-purple-800 hover:bg-purple-700 text-white text-lg font-bold flex items-center justify-center transition-colors"
-                    >+</button>
+              {concert.availableTickets === 0 ? (
+                /* ─── SOLD OUT: Show Join Waitlist ─── */
+                <div className="space-y-3">
+                  <div className="rounded-xl bg-red-900/30 border-2 border-red-500/50 text-red-300 px-4 py-3 text-center text-sm font-bold">
+                    🔴 SOLD OUT
                   </div>
-                </div>
-              )}
 
-              {/* ── Button 2: Public Sale ── */}
-              <div>
-                <button
-                  onClick={handlePublicSale}
-                  disabled={!publicSaleOpen || isBuying}
-                  className={`w-full py-4 px-6 rounded-xl flex items-center justify-center gap-3 text-base transition-all duration-200 shadow-lg neon-border
-                    ${ publicSaleOpen
-                        ? "bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-700 hover:to-purple-700 text-white hover:shadow-pink-500/50"
-                        : "bg-purple-900/40 border-pink-500/30 text-pink-400 cursor-not-allowed opacity-70"
-                    } disabled:opacity-60 disabled:cursor-not-allowed`}
-                >
-                  {!publicSaleOpen ? (
-                    <><Lock className="w-5 h-5" /> Public Sale opens in {formatCountdown(publicSaleTime)}</>
-                  ) : (
-                    <><Wallet className="w-5 h-5" />
-                      {!isConnected ? "Connect Wallet to Buy" : isBuying ? "Processing…" : "Public Sale — Buy Ticket"}
-                    </>
+                  <button
+                    onClick={async () => {
+                      if (!isConnected) {
+                        setAuthType("onechain");
+                        setShowAuthModal(true);
+                        return;
+                      }
+                      if (!concert.waitlist_object_id) {
+                        alert("No waitlist has been created for this concert yet. Check back soon!");
+                        return;
+                      }
+                      let priceMist: bigint;
+                      try { priceMist = parseConcertPriceMist(concert.price || ""); }
+                      catch (e: any) { alert(e?.message || "Invalid concert price"); return; }
+                      await joinWaitlist(concert.waitlist_object_id, priceMist);
+                    }}
+                    disabled={isBuying || !concert.waitlist_object_id}
+                    title={concert.waitlist_object_id
+                      ? "Join the waitlist — your OCT is held in escrow until a ticket becomes available"
+                      : "Waitlist coming soon"}
+                    className="w-full py-4 px-6 rounded-xl flex items-center justify-center gap-3 text-base font-semibold transition-all duration-200 shadow-lg neon-border bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    <Clock className="w-5 h-5" />
+                    {isBuying
+                      ? "Processing…"
+                      : concert.waitlist_object_id
+                      ? "Join Waitlist (Deposit OCT)"
+                      : "Waitlist Coming Soon"}
+                  </button>
+
+                  {concert.waitlist_object_id && (
+                    <p className="text-xs text-purple-300/70 text-center">
+                      Your OCT deposit is held in on-chain escrow. You will receive a ticket the moment a holder returns one.
+                    </p>
                   )}
-                </button>
-              </div>
+                </div>
+              ) : (
+                /* ─── TICKETS AVAILABLE: Normal buy buttons ─── */
+                <>
+                  {/* ── Button 1: Fan Presale (5-min head start) ── */}
+                  <div>
+                    <button
+                      onClick={handleFanPresale}
+                      disabled={!fanSaleOpen || isBuying || spotifyLoading}
+                      className={`w-full py-4 px-6 rounded-xl flex items-center justify-center gap-3 text-base transition-all duration-200 shadow-lg neon-border
+                        ${ fanSaleOpen && isFanVerified
+                            ? "bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white hover:shadow-green-500/50"
+                            : fanSaleOpen && !isFanVerified
+                            ? "bg-gradient-to-r from-yellow-600 to-orange-600 hover:from-yellow-700 hover:to-orange-700 text-white"
+                            : "bg-purple-900/40 border-pink-500/30 text-pink-400 cursor-not-allowed opacity-70"
+                        } disabled:opacity-60 disabled:cursor-not-allowed`}
+                    >
+                      {!fanSaleOpen ? (
+                        <><Lock className="w-5 h-5" /> Fan Presale opens in {formatCountdown(fanSaleTime)}</>
+                      ) : isFanVerified ? (
+                        <><ShieldCheck className="w-5 h-5" /> Fan Presale — Buy Now (Verified ✓)</>
+                      ) : spotifyLoading ? (
+                        <><Clock className="w-5 h-5 animate-spin" /> Connecting to Spotify…</>
+                      ) : (
+                        <><Music className="w-5 h-5" /> Fan Presale — Verify with Spotify</>
+                      )}
+                    </button>
+                    {fanSaleOpen && !isFanVerified && (
+                      <p className="text-xs text-yellow-300/70 mt-1 text-center">
+                        Scores 60+ get presale access. Your long-term listening history is checked.
+                      </p>
+                    )}
+                  </div>
 
+                  {/* ── Quantity Selector ── */}
+                  {publicSaleOpen && (
+                    <div className="flex items-center justify-between bg-purple-950/40 border-2 border-pink-500/30 rounded-xl px-4 py-3 neon-border">
+                      <span className="text-pink-200 text-sm font-medium">Quantity</span>
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => setQuantity(q => Math.max(1, q - 1))}
+                          className="w-8 h-8 rounded-full bg-purple-800 hover:bg-purple-700 text-white text-lg font-bold flex items-center justify-center transition-colors"
+                        >−</button>
+                        <span className="text-white font-bold w-6 text-center">{quantity}</span>
+                        <button
+                          onClick={() => setQuantity(q => Math.min(concert.availableTickets, q + 1))}
+                          className="w-8 h-8 rounded-full bg-purple-800 hover:bg-purple-700 text-white text-lg font-bold flex items-center justify-center transition-colors"
+                        >+</button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ── Button 2: Public Sale ── */}
+                  <div>
+                    <button
+                      onClick={handlePublicSale}
+                      disabled={!publicSaleOpen || isBuying}
+                      className={`w-full py-4 px-6 rounded-xl flex items-center justify-center gap-3 text-base transition-all duration-200 shadow-lg neon-border
+                        ${ publicSaleOpen
+                            ? "bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-700 hover:to-purple-700 text-white hover:shadow-pink-500/50"
+                            : "bg-purple-900/40 border-pink-500/30 text-pink-400 cursor-not-allowed opacity-70"
+                        } disabled:opacity-60 disabled:cursor-not-allowed`}
+                    >
+                      {!publicSaleOpen ? (
+                        <><Lock className="w-5 h-5" /> Public Sale opens in {formatCountdown(publicSaleTime)}</>
+                      ) : (
+                        <><Wallet className="w-5 h-5" />
+                          {!isConnected ? "Connect Wallet to Buy" : isBuying ? "Processing…" : "Public Sale — Buy Ticket"}
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </>
+              )}
               {(buyError || buyDigest) && (
                 <div className="bg-purple-950/30 backdrop-blur-sm rounded-xl p-4 border-2 border-pink-500/30 neon-border">
                   {buyError && (

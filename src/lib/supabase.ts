@@ -16,7 +16,8 @@ export const supabase =
     ? createClient(supabaseUrl, supabaseAnonKey)
     : null
 
-// Extends the static Concert type with the live on-chain column
+// Extends the static Concert type with live on-chain columns
 export type SupabaseConcert = Concert & {
-  concert_object_id: string | null  // shared Concert object on-chain (0x...)
+  concert_object_id: string | null    // shared Concert object on-chain (0x...)
+  waitlist_object_id: string | null   // shared Waitlist object on-chain (0x...) — optional
 }

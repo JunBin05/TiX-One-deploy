@@ -395,6 +395,7 @@ public fun buy_verified_fan_ticket(
     mut payment: Coin<0x2::oct::OCT>,
     seat: String,
     price: u64,
+    quantity: u64,
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
@@ -411,28 +412,34 @@ public fun buy_verified_fan_ticket(
         EInvalidSignature
     );
 
-    // Normal supply-cap + payment checks
-    assert!(concert.tickets_sold < concert.max_supply, ESoldOut);
-    assert!(coin::value(&payment) >= price, EIncorrectAmount);
+    assert!(quantity > 0, EZeroQuantity);
+    assert!(concert.tickets_sold + quantity <= concert.max_supply, ESoldOut);
+    let total = price * quantity;
+    assert!(coin::value(&payment) >= total, EIncorrectAmount);
 
-    let ticket_payment = coin::split(&mut payment, price, ctx);
+    let ticket_payment = coin::split(&mut payment, total, ctx);
     transfer::public_transfer(ticket_payment, @0xe551904e859d3358ca7813622f9ada529ddecd24801a5f6bddb4a521fcb9c940);
-    transfer::public_transfer(payment, ctx.sender());
-
-    concert.tickets_sold = concert.tickets_sold + 1;
+    transfer::public_transfer(payment, buyer);
 
     let expiration = clock::timestamp_ms(clock) + 2_592_000_000;
-    let ticket = Ticket {
-        id: object::new(ctx),
-        artist: concert.artist,
-        event_name: concert.event_name,
-        seat,
-        original_price: price,
-        is_scanned: false,
-        expires_at: expiration,
-        allow_admin_scan: true,
+
+    let mut i = 0u64;
+    while (i < quantity) {
+        let ticket = Ticket {
+            id: object::new(ctx),
+            artist: concert.artist,
+            event_name: concert.event_name,
+            seat,
+            original_price: price,
+            is_scanned: false,
+            expires_at: expiration,
+            allow_admin_scan: true,
+        };
+        transfer::public_transfer(ticket, buyer);
+        i = i + 1;
     };
-    transfer::public_transfer(ticket, ctx.sender());
+
+    concert.tickets_sold = concert.tickets_sold + quantity;
 }
 
 // =========================================================

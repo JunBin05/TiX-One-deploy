@@ -7,7 +7,8 @@ import {
   useSuiClient,
 } from "@mysten/dapp-kit";
 import { Transaction } from "@mysten/sui/transactions";
-import { ArrowLeft, Shield, ShoppingCart } from "lucide-react";
+import { ArrowLeft, Clock, Shield, ShoppingCart, Users } from "lucide-react";
+import { useConcerts } from "../hooks/useConcerts";
 import { PopBackground } from "../components/PopBackground";
 import DelbotVerification from "../components/DelbotVerification";
 import {
@@ -17,6 +18,7 @@ import {
   TICKET_LISTED_EVENT,
   TICKET_TYPE,
   TRANSFER_POLICY_ID,
+  WAITLIST_TYPE,
 } from "../onechain/config";
 
 type Listing = {
@@ -37,6 +39,12 @@ export default function MarketplacePage() {
   const suiClient = useSuiClient();
   const { mutateAsync: signAndExecuteTransaction } = useSignAndExecuteTransaction();
   const navigate = useNavigate();
+  const { concerts } = useConcerts();
+
+  type WaitlistEntry = { buyer: string; escrow_balance: string };
+  type WaitlistQueue = { concertId: string; concertName: string; objectId: string; queue: WaitlistEntry[] };
+  const [waitlistQueues, setWaitlistQueues] = useState<WaitlistQueue[]>([]);
+  const [isLoadingWaitlists, setIsLoadingWaitlists] = useState(false);
 
   const [isOrganizer, setIsOrganizer] = useState(false);
 
@@ -87,7 +95,7 @@ export default function MarketplacePage() {
         filter: { StructType: "0x2::kiosk::KioskOwnerCap" },
         options: { showContent: true },
       });
-      return capObjects.data?.[0]?.data?.content?.fields?.for || null;
+      return (capObjects.data?.[0]?.data?.content as any)?.fields?.for || null;
     } catch {
       return null;
     }
@@ -113,7 +121,7 @@ export default function MarketplacePage() {
         parentId: kioskId,
         name: listingField.name,
       });
-      const value = listingObj?.data?.content?.fields?.value;
+      const value = (listingObj?.data?.content as any)?.fields?.value;
       if (value === undefined || value === null) return null;
       return parseInt(value);
     } catch {
@@ -280,6 +288,36 @@ export default function MarketplacePage() {
     }
   };
 
+  useEffect(() => {
+    if (!concerts?.length) return;
+    let cancelled = false;
+    const fetchWaitlists = async () => {
+      setIsLoadingWaitlists(true);
+      const results: WaitlistQueue[] = [];
+      for (const concert of concerts) {
+        const wid = concert.waitlist_object_id;
+        if (!wid) continue;
+        try {
+          const obj = await suiClient.getObject({ id: wid, options: { showContent: true } });
+          const fields = (obj?.data?.content as any)?.fields;
+          if (!fields) continue;
+          const queue: WaitlistEntry[] = (fields.queue ?? []).map((e: any) => ({
+            buyer: e.fields?.buyer ?? e.buyer ?? "",
+            escrow_balance: e.fields?.escrow_balance?.fields?.value ?? e.fields?.escrow_balance ?? "0",
+          }));
+          results.push({ concertId: concert.id, concertName: concert.title, objectId: wid, queue });
+        } catch {
+          // skip failed objects
+        }
+      }
+      if (!cancelled) setWaitlistQueues(results);
+      setIsLoadingWaitlists(false);
+    };
+    fetchWaitlists();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [concerts?.length]);
+
   return (
     <div className="min-h-screen relative overflow-hidden">
       <PopBackground />
@@ -430,6 +468,62 @@ export default function MarketplacePage() {
                 </button>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* ─── Waitlist Queues Section ─── */}
+        {(isLoadingWaitlists || waitlistQueues.length > 0) && (
+          <div className="mt-10">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2 bg-gradient-to-br from-indigo-600 to-purple-600 rounded-lg shadow-lg neon-border">
+                <Clock className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h2 className="text-xl text-white neon-text">Waitlist Queues</h2>
+                <p className="text-sm text-purple-300">On-chain escrow — tickets go to the next person in queue</p>
+              </div>
+            </div>
+
+            {isLoadingWaitlists ? (
+              <div className="bg-purple-900/30 backdrop-blur-md rounded-2xl p-5 border-2 border-purple-500/30 neon-border shadow-xl">
+                <p className="text-purple-200">Loading waitlists…</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {waitlistQueues.map((wq) => (
+                  <div key={wq.objectId} className="bg-purple-900/30 backdrop-blur-md rounded-2xl p-5 border-2 border-indigo-500/30 neon-border shadow-xl">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Users className="w-4 h-4 text-indigo-300" />
+                      <h3 className="text-white font-medium truncate">{wq.concertName}</h3>
+                    </div>
+
+                    {wq.queue.length === 0 ? (
+                      <p className="text-sm text-purple-400 italic">Queue is empty</p>
+                    ) : (
+                      <ol className="space-y-2">
+                        {wq.queue.map((entry, i) => (
+                          <li key={entry.buyer + i} className="flex items-center gap-3 bg-purple-950/40 rounded-xl px-3 py-2 border border-indigo-500/20">
+                            <span className={`text-xs font-bold w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 ${
+                              i === 0 ? "bg-indigo-500 text-white" : "bg-purple-800 text-purple-200"
+                            }`}>
+                              {i + 1}
+                            </span>
+                            <span className="font-mono text-xs text-white truncate">{`${entry.buyer.slice(0, 10)}…${entry.buyer.slice(-6)}`}</span>
+                            <span className="ml-auto text-xs text-indigo-300 whitespace-nowrap">
+                              {(parseInt(entry.escrow_balance) / 1_000_000_000).toFixed(2)} OCT
+                            </span>
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+
+                    <p className="text-xs text-purple-400/70 mt-3 text-center">
+                      {wq.queue.length} in queue • Object: {wq.objectId.slice(0, 10)}…
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>

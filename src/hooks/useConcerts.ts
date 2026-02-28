@@ -5,6 +5,7 @@ import { supabase, type SupabaseConcert } from '../lib/supabase'
 const withDefaults = (c: any): SupabaseConcert => ({
   ...c,
   concert_object_id: c.concert_object_id ?? null,
+  waitlist_object_id: c.waitlist_object_id ?? null,
 })
 
 export function useConcerts() {

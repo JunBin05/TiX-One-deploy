@@ -14,8 +14,8 @@ import {
   Calendar,
   Clock,
   Copy,
-  Link2,
   MapPin,
+  Repeat2,
   Store,
   CheckCircle2,
 } from "lucide-react";
@@ -28,6 +28,8 @@ import {
   TICKET_LISTED_EVENT,
   TICKET_TYPE,
 } from "../onechain/config";
+import { useBuyTicket } from "../onechain/useBuyTicket";
+import { useConcertById } from "../hooks/useConcerts";
 
 type TicketFields = Record<string, any> & { objectId: string };
 
@@ -36,7 +38,6 @@ export default function MyTicketPage() {
   const suiClient = useSuiClient();
   const navigate = useNavigate();
 
-  const storageKeyPrivateLinks = (address: string) => `tixone.privateLinks.v1:${address}`;
   const storageKeyPublicListings = (address: string) => `tixone.publicListings.v1:${address}`;
 
   const parseMistU64 = (value: unknown): bigint | null => {
@@ -101,51 +102,23 @@ export default function MyTicketPage() {
   const [kioskOwnerCapId, setKioskOwnerCapId] = useState<string>("");
   const [isCreatingKiosk, setIsCreatingKiosk] = useState(false);
   const [isListing, setIsListing] = useState(false);
-  const [showListingModal, setShowListingModal] = useState<false | "public" | "private">(false);
+  const [showListingModal, setShowListingModal] = useState<false | "public">(false);
   const [isSquadPopupOpen, setIsSquadPopupOpen] = useState(false);
 
-  const [privateLinks, setPrivateLinks] = useState<Record<string, string>>({});
   const [listingStatusByTicketId, setListingStatusByTicketId] = useState<
-    Record<string, "none" | "public" | "private">
-  >({});
+    Record<string, "none" | "public">
+  >();
 
-  const privateSaleLink = useMemo(() => {
-    if (!kioskId || !selectedTicket?.objectId) return null;
-    const priceInMist = parseMistU64((selectedTicket as any).original_price);
-    if (priceInMist === null) return null;
-    return `${window.location.origin}/buy?kiosk=${kioskId}&ticket=${selectedTicket.objectId}&price=${priceInMist.toString()}`;
-  }, [kioskId, selectedTicket?.objectId, selectedTicket]);
+  // On-chain concert data (with concert_object_id + waitlist_object_id from Supabase)
+  const { concert: supabaseConcert } = useConcertById(selectedConcert?.id);
 
-  const displayedPrivateLink = useMemo(() => {
-    if (!selectedTicket?.objectId) return null;
-    const saved = privateLinks[selectedTicket.objectId];
-    if (saved) return saved;
-    if (listingStatusByTicketId[selectedTicket.objectId] === "private") return privateSaleLink;
-    return null;
-  }, [listingStatusByTicketId, privateLinks, privateSaleLink, selectedTicket?.objectId]);
+  // Waitlist hook
+  const { fulfillWaitlistOrder, isBuying: isReturning } = useBuyTicket();
 
   useEffect(() => {
     if (!currentAccount?.address) {
-      setPrivateLinks({});
       setListingStatusByTicketId({});
       return;
-    }
-
-    try {
-      const rawLinks = window.localStorage.getItem(storageKeyPrivateLinks(currentAccount.address));
-      if (rawLinks) {
-        const parsed = JSON.parse(rawLinks) as unknown;
-        if (parsed && typeof parsed === "object") {
-          const next: Record<string, string> = {};
-          for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
-            if (typeof k === "string" && typeof v === "string" && v) next[k] = v;
-          }
-          setPrivateLinks(next);
-        }
-      }
-    } catch (e) {
-      console.warn("[MyTicket] failed to load private links", e);
-      setPrivateLinks({});
     }
 
     try {
@@ -153,10 +126,10 @@ export default function MyTicketPage() {
       if (rawListed) {
         const parsed = JSON.parse(rawListed) as unknown;
         if (parsed && typeof parsed === "object") {
-          const next: Record<string, "none" | "public" | "private"> = {};
+          const next: Record<string, "none" | "public"> = {};
           for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
             if (typeof k !== "string") continue;
-            if (v === "public" || v === "private" || v === "none") next[k] = v;
+            if (v === "public" || v === "none") next[k] = v;
           }
           setListingStatusByTicketId(next);
         }
@@ -167,18 +140,6 @@ export default function MyTicketPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentAccount?.address]);
-
-  useEffect(() => {
-    if (!currentAccount?.address) return;
-    try {
-      window.localStorage.setItem(
-        storageKeyPrivateLinks(currentAccount.address),
-        JSON.stringify(privateLinks)
-      );
-    } catch (e) {
-      console.warn("[MyTicket] failed to persist private links", e);
-    }
-  }, [currentAccount?.address, privateLinks]);
 
   useEffect(() => {
     if (!currentAccount?.address) return;
@@ -198,7 +159,7 @@ export default function MyTicketPage() {
   }, [selectedTicketId]);
 
   const selectedListingStatus = selectedTicket?.objectId
-    ? listingStatusByTicketId[selectedTicket.objectId]
+    ? listingStatusByTicketId?.[selectedTicket.objectId]
     : undefined;
 
   useEffect(() => {
@@ -208,7 +169,7 @@ export default function MyTicketPage() {
       const ticketId = selectedTicket.objectId;
 
       // If we already know it's public-listed, keep UI stable.
-      if (listingStatusByTicketId[ticketId] === "public") return;
+      if (listingStatusByTicketId?.[ticketId] === "public") return;
 
       try {
         const dynamicFields = await suiClient.getDynamicFields({ parentId: kioskId, limit: 200 });
@@ -220,10 +181,10 @@ export default function MyTicketPage() {
           return rawId === ticketId;
         });
 
-        if (!listingField) {
+        if (listingField) {
           if (!cancelled) {
             setListingStatusByTicketId((prev) => {
-              if (prev[ticketId] === "none") return prev;
+              if (prev?.[ticketId] === "none") return prev;
               return { ...prev, [ticketId]: "none" };
             });
           }
@@ -242,9 +203,9 @@ export default function MyTicketPage() {
         });
 
         if (!cancelled) {
-          const nextStatus = isPublic ? "public" : "private";
+          const nextStatus: "public" | "none" = isPublic ? "public" : "none";
           setListingStatusByTicketId((prev) => {
-            if (prev[ticketId] === nextStatus) return prev;
+            if (prev?.[ticketId] === nextStatus) return prev;
             return { ...prev, [ticketId]: nextStatus };
           });
         }
@@ -468,8 +429,8 @@ export default function MyTicketPage() {
     if (!currentAccount || !selectedTicket) return;
     if (!requireKiosk()) return;
 
-    const existingStatus = listingStatusByTicketId[selectedTicket.objectId];
-    if (existingStatus === "public" || existingStatus === "private" || !!privateLinks[selectedTicket.objectId]) {
+    const existingStatus = listingStatusByTicketId?.[selectedTicket.objectId];
+    if (existingStatus === "public") {
       alert("This ticket is already listed and cannot be listed again.");
       return;
     }
@@ -507,64 +468,35 @@ export default function MyTicketPage() {
     }
   };
 
-  const listPrivate = async () => {
+  /**
+   * Return a ticket to the waitlist — the first waiting buyer gets the ticket
+   * and the seller receives the face-value OCT from escrow.
+   */
+  const returnToWaitlist = async () => {
     if (!currentAccount || !selectedTicket) return;
-    if (!requireKiosk()) return;
 
-    if (listingStatusByTicketId[selectedTicket.objectId] === "public") {
-      alert("This ticket is already listed and cannot be listed again.");
+    const concertObjectId = supabaseConcert?.concert_object_id;
+    const waitlistObjectId = supabaseConcert?.waitlist_object_id;
+
+    if (!concertObjectId) {
+      alert("Concert is not yet linked on-chain. Sell on the public marketplace instead.");
+      return;
+    }
+    if (!waitlistObjectId) {
+      alert("No waitlist is active for this concert yet.");
       return;
     }
 
-    if (privateLinks[selectedTicket.objectId]) {
-      // Link already created for this ticket — keep showing it.
-      return;
-    }
+    const confirmed = window.confirm(
+      "Return this ticket to the waitlist?\nThe first waiting buyer will receive your ticket and you will receive the face-value OCT."
+    );
+    if (!confirmed) return;
 
-    const priceInMist = parseMistU64(selectedTicket.original_price);
-    if (priceInMist === null) {
-      alert("Ticket price is missing or invalid.");
-      return;
-    }
-
-    setIsListing(true);
-    try {
-      const tx = new Transaction();
-      tx.moveCall({
-        target: `${PACKAGE_ID}::ticket::safe_private_list_ticket`,
-        arguments: [
-          tx.object(kioskId),
-          tx.object(kioskOwnerCapId),
-          tx.object(selectedTicket.objectId),
-          tx.pure.u64(priceInMist),
-          tx.object(LISTING_REGISTRY_ID),
-        ],
-      });
-
-      await signAndExecuteTransaction({ transaction: tx });
-      const url =
-        privateSaleLink ||
-        `${window.location.origin}/buy?kiosk=${kioskId}&ticket=${selectedTicket.objectId}&price=${priceInMist.toString()}`;
-      setPrivateLinks((prev) => ({ ...prev, [selectedTicket.objectId]: url }));
-      setListingStatusByTicketId((prev) => ({ ...prev, [selectedTicket.objectId]: "private" }));
-      setShowListingModal(false);
-      alert("✅ Private link created!");
-    } catch (e) {
-      console.error("[MyTicket] list private error", e);
-      alert("Transaction failed. Check the console for details.");
-    } finally {
-      setIsListing(false);
-    }
-  };
-
-  const copyPrivateLink = async (url: string) => {
-    try {
-      await navigator.clipboard.writeText(url);
-      alert("Private link copied to clipboard!");
-    } catch (e) {
-      console.error("[MyTicket] clipboard error", e);
-      alert(url);
-    }
+    await fulfillWaitlistOrder(
+      selectedTicket.objectId,
+      concertObjectId,
+      waitlistObjectId
+    );
   };
 
   return (
@@ -798,7 +730,7 @@ export default function MyTicketPage() {
                       </div>
                     ) : (
                       <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        {listingStatusByTicketId[selectedTicket.objectId] === "public" ? (
+                        {listingStatusByTicketId?.[selectedTicket.objectId] === "public" ? (
                           <button
                             disabled={true}
                             className="w-full rounded-xl border border-green-500/40 bg-green-500/10 text-green-300 py-3 px-5 font-bold cursor-not-allowed"
@@ -809,19 +741,6 @@ export default function MyTicketPage() {
                               Listed on Global Marketplace
                             </div>
                             <div className="mt-1 text-xs text-green-300/80 font-medium">Cannot list again</div>
-                          </button>
-                        ) : listingStatusByTicketId[selectedTicket.objectId] === "private" ||
-                          !!privateLinks[selectedTicket.objectId] ? (
-                          <button
-                            disabled={true}
-                            className="w-full rounded-xl border border-green-500/40 bg-green-500/10 text-green-300 py-3 px-5 font-bold cursor-not-allowed"
-                            title="This ticket is privately listed"
-                          >
-                            <div className="flex items-center justify-center gap-2">
-                              <Link2 className="w-4 h-4 text-green-300" />
-                              Private Link Created
-                            </div>
-                            <div className="mt-1 text-xs text-green-300/80 font-medium">Share the link below</div>
                           </button>
                         ) : (
                           <button
@@ -838,43 +757,26 @@ export default function MyTicketPage() {
                           </button>
                         )}
 
-                        {privateLinks[selectedTicket.objectId] ||
-                        listingStatusByTicketId[selectedTicket.objectId] === "public" ||
-                        listingStatusByTicketId[selectedTicket.objectId] === "private" ? null : (
-                          <button
-                            onClick={() => setShowListingModal("private")}
-                            disabled={isListing}
-                            className="w-full rounded-xl border-2 border-pink-500 bg-transparent text-pink-300 py-3 px-5 hover:bg-pink-900/30 transition-colors font-bold disabled:opacity-60 disabled:cursor-not-allowed"
-                            title="Create a private link to sell to a specific buyer"
-                          >
-                            <div className="flex items-center justify-center gap-2">
-                              <Link2 className="w-4 h-4 text-pink-300" />
-                              Create Private Link
-                            </div>
-                            <div className="mt-1 text-xs text-pink-400 font-medium">Transfer to specific buyer</div>
-                          </button>
-                        )}
+                        {/* Return to Waitlist: gives ticket to first waiting buyer, seller gets OCT */}
+                        <button
+                          onClick={returnToWaitlist}
+                          disabled={isReturning || !supabaseConcert?.waitlist_object_id}
+                          title={supabaseConcert?.waitlist_object_id
+                            ? "Send ticket to first waiting buyer and receive OCT"
+                            : "No active waitlist for this concert"}
+                          className="w-full rounded-xl border-2 border-purple-400 bg-transparent text-purple-300 py-3 px-5 hover:bg-purple-900/30 transition-colors font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <div className="flex items-center justify-center gap-2">
+                            <Repeat2 className="w-4 h-4" />
+                            {isReturning ? "Processing\u2026" : "Return to Waitlist"}
+                          </div>
+                          <div className="mt-1 text-xs text-purple-400 font-medium">
+                            {supabaseConcert?.waitlist_object_id ? "Send to next waiting fan" : "No waitlist active"}
+                          </div>
+                        </button>
                       </div>
                     )}
 
-                    {kioskId && displayedPrivateLink && (
-                      <div className="mt-4 rounded-xl border border-pink-500/50 bg-black/40 p-3 shadow-inner">
-                        <div className="text-xs font-bold uppercase tracking-wider text-pink-400">Private link</div>
-                        <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
-                          <code className="min-w-0 w-full flex-1 text-xs sm:text-sm text-pink-200 font-mono break-all">
-                            {displayedPrivateLink}
-                          </code>
-                          <button
-                            onClick={() => copyPrivateLink(displayedPrivateLink)}
-                            className="w-full sm:w-auto shrink-0 inline-flex items-center justify-center gap-2 rounded-xl border border-pink-500/50 bg-pink-600/20 px-3 py-2 text-sm font-bold text-pink-300 hover:bg-pink-600/40 transition-colors"
-                            title="Copy private link"
-                          >
-                            <Copy className="w-4 h-4" />
-                            Copy
-                          </button>
-                        </div>
-                      </div>
-                    )}
                   </div>
                 </div>
               </div>
@@ -896,7 +798,7 @@ export default function MyTicketPage() {
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowListingModal(false)}>
           <div className="w-full max-w-md rounded-3xl border border-pink-500/50 bg-gradient-to-br from-purple-950 to-indigo-950 neon-border backdrop-blur-md p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="text-xl font-bold text-white neon-text">
-              {showListingModal === "private" ? "Create Private Link" : "List on Global Market"}
+              List on Global Market
             </div>
             <div className="mt-2 text-sm text-pink-200">
               Face-value policy enforced: resale is capped at the original price.
@@ -918,7 +820,7 @@ export default function MyTicketPage() {
                 Cancel
               </button>
               <button
-                onClick={showListingModal === "private" ? listPrivate : listPublic}
+                onClick={listPublic}
                 disabled={isListing}
                 className="w-full rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 border-none py-3 px-5 text-white hover:from-pink-500 hover:to-purple-500 transition-colors font-bold shadow-[0_0_15px_rgba(236,72,153,0.4)] disabled:opacity-60 disabled:cursor-not-allowed"
               >
