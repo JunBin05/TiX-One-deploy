@@ -1,10 +1,15 @@
 import { createContext, useContext, useState, ReactNode } from "react";
 
+const LS_KEY = 'tix_fan_scores';
+
 interface AuthContextType {
   isOneChainConnected: boolean;
   isSpotifyConnected: boolean;
+  fanScores: Record<string, number>;
+  spotifyLoading: boolean;
   connectOneChain: () => void;
   connectSpotify: () => void;
+  storeFanScores: (scoresStr: string) => void;
   disconnectOneChain: () => void;
   disconnectSpotify: () => void;
 }
@@ -13,24 +18,49 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [isOneChainConnected, setIsOneChainConnected] = useState(false);
-  const [isSpotifyConnected, setIsSpotifyConnected] = useState(false);
+  const [spotifyLoading, setSpotifyLoading] = useState(false);
+  const [fanScores, setFanScores] = useState<Record<string, number>>(() => {
+    try {
+      const stored = localStorage.getItem(LS_KEY);
+      return stored ? JSON.parse(stored) : {};
+    } catch { return {}; }
+  });
 
-  const connectOneChain = () => {
-    // Backend logic will be handled by teammates
-    setIsOneChainConnected(true);
+  const isSpotifyConnected = Object.keys(fanScores).length > 0;
+
+  const connectOneChain = () => setIsOneChainConnected(true);
+
+  const connectSpotify = async () => {
+    setSpotifyLoading(true);
+    try {
+      const res = await fetch('http://127.0.0.1:8787/auth-url-global');
+      const { url } = await res.json();
+      window.location.assign(url); // full-page redirect to Spotify
+    } catch (e) {
+      console.error('[spotify] failed to get auth URL', e);
+      setSpotifyLoading(false);
+    }
   };
 
-  const connectSpotify = () => {
-    // Backend logic will be handled by teammates
-    setIsSpotifyConnected(true);
+  const storeFanScores = (scoresStr: string) => {
+    try {
+      const parsed: Record<string, number> = {};
+      for (const pair of scoresStr.split(',')) {
+        const [id, score] = pair.split(':');
+        if (id && score !== undefined) parsed[id] = parseInt(score, 10);
+      }
+      setFanScores(parsed);
+      localStorage.setItem(LS_KEY, JSON.stringify(parsed));
+    } catch (e) {
+      console.error('[spotify] failed to parse fan scores', e);
+    }
   };
 
-  const disconnectOneChain = () => {
-    setIsOneChainConnected(false);
-  };
+  const disconnectOneChain = () => setIsOneChainConnected(false);
 
   const disconnectSpotify = () => {
-    setIsSpotifyConnected(false);
+    setFanScores({});
+    localStorage.removeItem(LS_KEY);
   };
 
   return (
@@ -38,8 +68,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       value={{
         isOneChainConnected,
         isSpotifyConnected,
+        fanScores,
+        spotifyLoading,
         connectOneChain,
         connectSpotify,
+        storeFanScores,
         disconnectOneChain,
         disconnectSpotify,
       }}

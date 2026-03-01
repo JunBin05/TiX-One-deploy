@@ -1,5 +1,5 @@
-import { useParams, Link } from "react-router";
-import { concerts } from "../data/concerts";
+import { useParams, Link, useNavigate, useLocation } from "react-router";
+import { useConcertById } from "../hooks/useConcerts";
 import {
   Calendar,
   MapPin,
@@ -7,24 +7,174 @@ import {
   ArrowLeft,
   Wallet,
   Music,
+  Lock,
+  Clock,
+  ShieldCheck,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useAuth } from "../context/AuthContext";
 import { PopBackground } from "../components/PopBackground";
+import { ConnectButton, useCurrentAccount } from "@mysten/dapp-kit";
+import { useBuyTicket } from "../onechain/useBuyTicket";
+import DelbotVerification from "../components/DelbotVerification";
+import { supabase } from "../lib/supabase";
 
 export default function ConcertDetail() {
   const { id } = useParams();
-  const concert = concerts.find((c) => c.id === id);
+  const currentAccount = useCurrentAccount();
+  const { concert, loading: concertLoading, refetch: refetchConcert } = useConcertById(id);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authType, setAuthType] = useState<
     "onechain" | "spotify" | null
   >(null);
-  const {
-    isOneChainConnected,
-    isSpotifyConnected,
-    connectOneChain,
-    connectSpotify,
-  } = useAuth();
+  const { isSpotifyConnected, fanScores } = useAuth();
+  const { buyTicketAtPrice, buyVerifiedFanTicket, joinWaitlist, isBuying, buyError, buyDigest, isConnected } = useBuyTicket();
+  const [waitlistJoined, setWaitlistJoined] = useState(false);
+  const [showDelbot, setShowDelbot] = useState(false);
+  const [pendingPurchaseType, setPendingPurchaseType] = useState<"fan" | "public" | null>(null);
+  const [quantity, setQuantity] = useState(1);
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  // ── Fan verification state ─────────────────────────────────────────────────
+  const [isFanVerified, setIsFanVerified] = useState(false);
+  const [fanScore, setFanScore] = useState<number | null>(null);
+  const [fanToken, setFanToken] = useState<string | null>(null); // HMAC token issued by backend after Spotify check
+  const [spotifyLoading, setSpotifyLoading] = useState(false);
+  const [fanBtnHovered, setFanBtnHovered] = useState(false);
+
+  // ── Live clock (ticks every second) ───────────────────────────────────────
+  const [currentTime, setCurrentTime] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setCurrentTime(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // ── Pre-verify from global Spotify check (done on homepage) ─────────────
+  useEffect(() => {
+    if (!concert) return;
+    const stored = fanScores[concert.id];
+    if (stored !== undefined) {
+      setFanScore(stored);
+      if (stored >= 60) setIsFanVerified(true);
+    }
+  }, [concert, fanScores]);
+
+  // ── Read ?score= and ?fanToken= from URL after per-concert Spotify callback, clean URL ───
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const scoreStr  = params.get("score");
+    const tokenStr  = params.get("fanToken");
+    if (scoreStr !== null) {
+      const score = parseInt(scoreStr, 10);
+      setFanScore(score);
+      if (score >= 60) setIsFanVerified(true);
+    }
+    if (tokenStr) setFanToken(tokenStr);
+    if (scoreStr !== null || tokenStr) {
+      // Strip query params so URL looks clean
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, [location.search]);
+
+  // ── Scroll to #buy anchor if navigated directly with the hash ─────────────
+  useEffect(() => {
+    if (location.hash === "#buy" && concert) {
+      setTimeout(() => {
+        document.getElementById("buy")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 150);
+    }
+  }, [location.hash, concert]);
+
+  // ── Sale times: use DB fields if set, otherwise fall back to 14-day hardcode ──────
+  const publicSaleTime = (() => {
+    if (!concert) return 0;
+    if ((concert as any).public_sale_time) return new Date((concert as any).public_sale_time).getTime();
+    const d = new Date(concert.date);
+    d.setUTCHours(10, 0, 0, 0);
+    return d.getTime() - 14 * 24 * 60 * 60 * 1000;
+  })();
+  const fanSaleTime = (() => {
+    if (!concert) return 0;
+    if ((concert as any).fan_sale_time) return new Date((concert as any).fan_sale_time).getTime();
+    return publicSaleTime - 5 * 60 * 1000;
+  })();
+
+  // ── Countdown formatter ───────────────────────────────────────────────────
+  const formatCountdown = (targetMs: number): string => {
+    const diff = targetMs - currentTime;
+    if (diff <= 0) return "";
+    const days  = Math.floor(diff / 86_400_000);
+    const hours = Math.floor((diff % 86_400_000) / 3_600_000);
+    const mins  = Math.floor((diff % 3_600_000) / 60_000);
+    const secs  = Math.floor((diff % 60_000) / 1_000);
+    if (days > 0)  return `${days}d ${hours}h ${mins}m`;
+    if (hours > 0) return `${hours}h ${mins}m ${secs}s`;
+    return `${mins}m ${secs}s`;
+  };
+
+  const fanSaleOpen    = currentTime >= fanSaleTime;
+  const publicSaleOpen = currentTime >= publicSaleTime;
+
+  // ── Modal auto-close when wallet connects ─────────────────────────────────
+  useEffect(() => {
+    if (showAuthModal && authType === "onechain" && isConnected) {
+      setShowAuthModal(false);
+      setAuthType(null);
+    }
+  }, [showAuthModal, authType, isConnected]);
+
+  const parseConcertPriceMist = (priceLabel: string): bigint => {
+    const raw = String(priceLabel ?? "")
+      .trim()
+      .replace(/\s*oct\s*$/i, "")
+      .trim();
+    if (!raw) throw new Error("Concert price is missing.");
+    if (!/^\d+(\.\d{0,9})?$/.test(raw)) {
+      throw new Error(`Invalid concert price format: ${priceLabel}`);
+    }
+    const [intPart, fracPart = ""] = raw.split(".");
+    const fracPadded = (fracPart + "0".repeat(9)).slice(0, 9);
+    return BigInt(intPart) * 1_000_000_000n + BigInt(fracPadded);
+  };
+
+  // ── Trigger Spotify OAuth for the current concert ─────────────────────────
+  const handleSpotifyAuth = useCallback(async () => {
+    if (!concert) return;
+    setSpotifyLoading(true);
+    try {
+      const backendUrl = typeof import.meta.env.VITE_BACKEND_URL === "string" && import.meta.env.VITE_BACKEND_URL
+        ? import.meta.env.VITE_BACKEND_URL
+        : "http://127.0.0.1:8787";
+      const res = await fetch(
+        `${backendUrl}/auth-url?eventId=${encodeURIComponent(concert.id)}&artistName=${encodeURIComponent(concert.artist)}`,
+      );
+      const data = await res.json();
+      if (data.url) {
+        window.location.assign(data.url);
+      } else {
+        alert(data.error || "Failed to get Spotify auth URL");
+        setSpotifyLoading(false);
+      }
+    } catch {
+      alert("Cannot reach backend. Make sure it is running.");
+      setSpotifyLoading(false);
+    }
+  }, [concert]);
+
+  if (concertLoading) {
+    return (
+      <div className="min-h-screen relative overflow-hidden flex items-center justify-center">
+        <PopBackground />
+        <div className="concert-lights" />
+        <div className="fixed inset-0 bg-gradient-to-br from-purple-900 via-indigo-900 to-blue-900 animate-lights -z-10" />
+        <div className="text-center relative z-10">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-pink-500 mx-auto mb-4" />
+          <p className="text-pink-200">Loading concert…</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!concert) {
     return (
@@ -49,38 +199,95 @@ export default function ConcertDetail() {
     );
   }
 
-  const handleBuyTicket = () => {
-    if (isOneChainConnected) {
-      // Already connected, proceed with ticket purchase
-      alert("Proceeding to ticket purchase/queue...");
-    } else {
+  const handleBuyTicket = (type: "fan" | "public") => {
+    if (!isConnected) {
       setAuthType("onechain");
       setShowAuthModal(true);
+      return;
     }
+    setPendingPurchaseType(type);
+    setShowDelbot(true);
   };
 
-  const handleAuthorizeFan = () => {
-    if (isSpotifyConnected) {
-      // Already connected, proceed with fan authorization
-      alert("Fan already authorized via Spotify!");
-    } else {
-      setAuthType("spotify");
-      setShowAuthModal(true);
+  const handleFanPresale = () => {
+    if (!fanSaleOpen) return; // guard: button disabled anyway
+    if (!isFanVerified) {
+      handleSpotifyAuth();
+      return;
     }
+    handleBuyTicket("fan");
+  };
+
+  const handlePublicSale = () => {
+    if (!publicSaleOpen) return;
+    handleBuyTicket("public");
+  };
+
+  const proceedWithPurchase = async () => {
+    setShowDelbot(false);
+
+    if (!concert.concert_object_id) {
+      alert("This concert is not yet linked to the blockchain. Please contact the organizer.");
+      setPendingPurchaseType(null);
+      return;
+    }
+
+    let priceMist: bigint;
+    try {
+      priceMist = parseConcertPriceMist(concert.price || "");
+      if (priceMist <= 0n) throw new Error("Concert price must be greater than 0.");
+    } catch (e: any) {
+      alert(e?.message || "Invalid concert price");
+      setPendingPurchaseType(null);
+      return;
+    }
+
+    // ── Verified Fan path — get backend Ed25519 signature first ───────────
+    if (pendingPurchaseType === "fan" && isFanVerified && fanToken) {
+      setPendingPurchaseType(null);
+      const backendUrl = typeof import.meta.env.VITE_BACKEND_URL === "string" && import.meta.env.VITE_BACKEND_URL
+        ? import.meta.env.VITE_BACKEND_URL
+        : "http://127.0.0.1:8787";
+      try {
+        const signRes = await fetch(
+          `${backendUrl}/sign-fan-purchase?wallet=${encodeURIComponent(currentAccount!.address)}&concertObjectId=${encodeURIComponent(concert.concert_object_id)}&fanToken=${encodeURIComponent(fanToken)}`
+        );
+        const signData = await signRes.json();
+        if (signData.error) throw new Error(signData.error);
+        const digest = await buyVerifiedFanTicket(priceMist, concert.concert_object_id, signData.signature, "Fan Presale");
+        if (digest) {
+          await supabase?.rpc('decrement_tickets', { row_id: concert.id, qty: quantity });
+          refetchConcert();
+          const go = window.confirm("Fan ticket minted! 🎉 Go to My Tickets now?");
+          if (go) window.location.assign("/my-ticket");
+        }
+      } catch (err: any) {
+        alert(err.message || "Could not get fan verification signature.");
+      }
+      return;
+    }
+
+    // ── Public sale path ─────────────────────────────────────────────────
+    setPendingPurchaseType(null);
+    buyTicketAtPrice(priceMist, concert.concert_object_id, "General Admission", quantity).then(async (digest) => {
+      if (digest) {
+        await supabase?.rpc('decrement_tickets', { row_id: concert.id, qty: quantity });
+        refetchConcert();
+        const shouldRedirect = window.confirm(`${quantity} ticket${quantity > 1 ? "s" : ""} minted! Go to My Tickets now?`);
+        if (shouldRedirect) window.location.assign("/my-ticket");
+      }
+    });
+  };
+
+  const handleBotDetected = () => {
+    setShowDelbot(false);
+    setPendingPurchaseType(null);
+    navigate("/bot-detected");
   };
 
   const closeModal = () => {
     setShowAuthModal(false);
     setAuthType(null);
-  };
-
-  const handleModalAuth = () => {
-    if (authType === "onechain") {
-      connectOneChain();
-    } else if (authType === "spotify") {
-      connectSpotify();
-    }
-    closeModal();
   };
 
   return (
@@ -206,101 +413,321 @@ export default function ConcertDetail() {
               </p>
             </div>
 
-            {/* Action Buttons */}
-            <div className="space-y-4">
-              <button
-                onClick={handleBuyTicket}
-                className="w-full bg-gradient-to-r from-pink-600 to-purple-600 text-white py-4 px-6 rounded-xl hover:from-pink-700 hover:to-purple-700 transition-all duration-200 shadow-lg hover:shadow-pink-500/50 flex items-center justify-center gap-3 text-base neon-border"
-              >
-                <Wallet className="w-5 h-5" />
-                {isOneChainConnected
-                  ? "Buy Ticket / Join Queue"
-                  : "Connect to Buy Ticket"}
-              </button>
+            {/* Action Buttons — Dual Countdown or Sold-Out Waitlist */}
+            <div id="buy" className="space-y-4">
 
-              <button
-                onClick={handleAuthorizeFan}
-                className="w-full bg-gradient-to-r from-green-600 to-emerald-600 border-2 border-green-500/50 text-white py-4 px-6 rounded-xl hover:from-green-700 hover:to-emerald-700 hover:border-green-400 transition-all duration-200 shadow-lg flex items-center justify-center gap-3 text-base neon-border"
-              >
-                <Music className="w-5 h-5" />
-                {isSpotifyConnected
-                  ? "Authorized Fan ✓"
-                  : "Authorize as Fan (Spotify)"}
-              </button>
+              {/* Fan score badge (shown after Spotify callback) */}
+              {fanScore !== null && concert.availableTickets > 0 && (
+                <div className={`flex items-center gap-2 rounded-xl px-4 py-2 border-2 text-sm ${
+                  isFanVerified
+                    ? "bg-green-900/40 border-green-500/60 text-green-300"
+                    : "bg-red-900/30 border-red-500/50 text-red-300"
+                }`}>
+                  <ShieldCheck className="w-4 h-4 flex-shrink-0" />
+                  {isFanVerified
+                    ? `Fan verified ✓ — Score: ${fanScore}/100`
+                    : `Score too low (${fanScore}/100) — need 60+ for presale`}
+                </div>
+              )}
+
+              {concert.availableTickets === 0 ? (
+                /* ─── SOLD OUT: Show Join Waitlist ─── */
+                <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                  <style>{`@keyframes soldout-pulse { 0%,100%{opacity:1;box-shadow:0 0 8px #ef4444,0 0 16px #ef4444} 50%{opacity:0.4;box-shadow:0 0 4px #ef4444} }`}</style>
+                  <div style={{
+                    borderRadius: "12px",
+                    background: "linear-gradient(135deg, rgba(127,0,0,0.5), rgba(185,28,28,0.35))",
+                    border: "2px solid rgba(239,68,68,0.7)",
+                    padding: "14px 20px",
+                    textAlign: "center",
+                    boxShadow: "0 0 24px rgba(239,68,68,0.35), inset 0 0 30px rgba(185,28,28,0.15)",
+                    position: "relative",
+                    overflow: "hidden",
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "10px" }}>
+                      <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: "#ef4444", display: "inline-block", animation: "soldout-pulse 1.5s infinite" }} />
+                      <span style={{ color: "#fca5a5", fontWeight: 800, fontSize: "1.1rem", letterSpacing: "0.2em", textTransform: "uppercase", textShadow: "0 0 12px rgba(239,68,68,0.8)" }}>
+                        Sold Out
+                      </span>
+                      <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: "#ef4444", display: "inline-block", animation: "soldout-pulse 1.5s infinite" }} />
+                    </div>
+                    <p style={{ color: "rgba(252,165,165,0.6)", fontSize: "0.72rem", marginTop: "4px", letterSpacing: "0.05em" }}>
+                      Every ticket has been claimed — but don't give up yet
+                    </p>
+                  </div>
+
+                  {waitlistJoined && !buyError ? (
+                    /* ─── SUCCESS STATE ─── */
+                    <div style={{ background: "linear-gradient(135deg, rgba(20,83,45,0.7), rgba(6,78,59,0.7))", border: "2px solid rgba(74,222,128,0.6)", borderRadius: "12px", padding: "20px 16px", textAlign: "center", boxShadow: "0 0 24px rgba(74,222,128,0.25)" }}>
+                      <div style={{ fontSize: "2rem", marginBottom: "8px" }}>🎉</div>
+                      <p style={{ color: "#86efac", fontWeight: 700, fontSize: "1.1rem", marginBottom: "6px" }}>You're in the queue!</p>
+                      <p style={{ color: "#bbf7d0", fontSize: "0.85rem", lineHeight: 1.5 }}>
+                        Your OCT is safely held in on-chain escrow.<br />
+                        The moment a ticket becomes available, it's yours — automatically.
+                      </p>
+                      <p style={{ color: "rgba(134,239,172,0.6)", fontSize: "0.72rem", marginTop: "10px", fontFamily: "monospace", wordBreak: "break-all" }}>
+                        Tx: {buyDigest}
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      <button
+                        onClick={async () => {
+                          if (!isConnected) {
+                            setAuthType("onechain");
+                            setShowAuthModal(true);
+                            return;
+                          }
+                          if (!concert.waitlist_object_id) {
+                            alert("No waitlist has been created for this concert yet. Check back soon!");
+                            return;
+                          }
+                          let priceMist: bigint;
+                          try { priceMist = parseConcertPriceMist(concert.price || ""); }
+                          catch (e: any) { alert(e?.message || "Invalid concert price"); return; }
+                          await joinWaitlist(concert.waitlist_object_id, priceMist);
+                          setWaitlistJoined(true);
+                        }}
+                        disabled={isBuying || !concert.waitlist_object_id}
+                        title={concert.waitlist_object_id
+                          ? "Join the waitlist — your OCT is held in escrow until a ticket becomes available"
+                          : "Waitlist coming soon"}
+                        className="w-full py-4 px-6 rounded-xl flex items-center justify-center gap-3 text-base font-semibold transition-all duration-200 shadow-lg neon-border bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        <Clock className="w-5 h-5" />
+                        {isBuying
+                          ? "Processing…"
+                          : concert.waitlist_object_id
+                          ? "Join Waitlist (Deposit OCT)"
+                          : "Waitlist Coming Soon"}
+                      </button>
+
+                      {concert.waitlist_object_id && (
+                        <p className="text-xs text-purple-300/70 text-center">
+                          Your OCT deposit is held in on-chain escrow. You will receive a ticket the moment a holder returns one.
+                        </p>
+                      )}
+                    </>
+                  )}
+                </div>
+              ) : (
+                /* ─── TICKETS AVAILABLE: Normal buy buttons ─── */
+                <>
+                  {/* ── Quantity Selector (shown during fan presale AND public sale) ── */}
+                  {(fanSaleOpen || publicSaleOpen) && (
+                    <div style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      background: "linear-gradient(135deg, rgba(30,20,80,0.8), rgba(20,10,60,0.8))",
+                      border: "2px solid rgba(139,92,246,0.45)",
+                      borderRadius: "14px",
+                      padding: "12px 20px",
+                      boxShadow: "0 0 12px rgba(139,92,246,0.15)",
+                    }}>
+                      <span style={{ color: "#c4b5fd", fontWeight: 600, fontSize: "0.95rem" }}>Quantity</span>
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => setQuantity(q => Math.max(1, q - 1))}
+                          style={{ width:"32px", height:"32px", borderRadius:"50%", background:"rgba(109,40,217,0.35)", border:"1px solid rgba(139,92,246,0.5)", color:"#c4b5fd", fontSize:"1.2rem", fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer" }}
+                        >−</button>
+                        <span style={{ color:"#ffffff", fontWeight:700, width:"24px", textAlign:"center", fontSize:"1rem" }}>{quantity}</span>
+                        <button
+                          onClick={() => setQuantity(q => Math.min(concert.availableTickets, q + 1))}
+                          style={{ width:"32px", height:"32px", borderRadius:"50%", background:"rgba(109,40,217,0.35)", border:"1px solid rgba(139,92,246,0.5)", color:"#c4b5fd", fontSize:"1.2rem", fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer" }}
+                        >+</button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ── Button 1: Fan Presale (5-min head start) ── */}
+                  <div style={fanSaleOpen ? {
+                    background: fanBtnHovered
+                      ? "linear-gradient(135deg, rgba(4,60,30,0.75), rgba(3,40,20,0.75))"
+                      : "linear-gradient(135deg, rgba(6,46,30,0.6), rgba(4,30,20,0.6))",
+                    border: fanBtnHovered
+                      ? "2px solid rgba(52,211,153,0.7)"
+                      : "2px solid rgba(52,211,153,0.4)",
+                    borderRadius: "14px",
+                    padding: "4px",
+                    boxShadow: fanBtnHovered
+                      ? "0 0 22px rgba(16,185,129,0.35), 0 0 40px rgba(16,185,129,0.12)"
+                      : "0 0 14px rgba(16,185,129,0.12)",
+                    transition: "all 0.2s ease",
+                  } : undefined}>
+                    <button
+                      onClick={handleFanPresale}
+                      onMouseEnter={() => setFanBtnHovered(true)}
+                      onMouseLeave={() => setFanBtnHovered(false)}
+                      disabled={!fanSaleOpen || isBuying || spotifyLoading}
+                      className="w-full py-4 px-6 rounded-xl flex items-center justify-center gap-3 text-base disabled:cursor-not-allowed"
+                      style={!fanSaleOpen ? {
+                        background: "linear-gradient(135deg, rgba(67,20,110,0.95), rgba(49,10,90,0.95))",
+                        border: "2px solid rgba(167,139,250,0.6)",
+                        color: "#c4b5fd",
+                        boxShadow: "0 0 14px rgba(139,92,246,0.25), inset 0 0 20px rgba(109,40,217,0.1)",
+                        transition: "all 0.2s ease",
+                      } : {
+                        background: fanBtnHovered
+                          ? "linear-gradient(135deg, #059669, #10b981, #34d399)"
+                          : "linear-gradient(135deg, #047857, #059669, #10b981)",
+                        color: "#ffffff",
+                        fontWeight: 700,
+                        border: "none",
+                        boxShadow: fanBtnHovered
+                          ? "0 0 20px rgba(16,185,129,0.7), 0 0 40px rgba(16,185,129,0.3)"
+                          : "0 0 12px rgba(16,185,129,0.4)",
+                        transform: fanBtnHovered ? "translateY(-1px)" : "translateY(0)",
+                        transition: "all 0.2s ease",
+                      }}>
+                      {!fanSaleOpen ? (
+                        <><Lock className="w-5 h-5" /> Fan Presale opens in {formatCountdown(fanSaleTime)}</>
+                      ) : isFanVerified ? (
+                        <><ShieldCheck className="w-5 h-5" /> Fan Presale — Buy Now (Verified ✓)</>
+                      ) : spotifyLoading ? (
+                        <><Clock className="w-5 h-5 animate-spin" /> Connecting to Spotify…</>
+                      ) : (
+                        <><Music className="w-5 h-5" /> Fan Presale — Verify with Spotify</>
+                      )}
+                    </button>
+                    {fanSaleOpen && !isFanVerified && (
+                      <p style={{ fontSize:"0.72rem", color:"#6ee7b7", textAlign:"center", padding:"6px 12px 4px", opacity:0.8 }}>
+                        Scores 60+ get presale access. Your long-term listening history is checked.
+                      </p>
+                    )}
+                  </div>
+
+                  {/* ── Button 2: Public Sale ── */}
+                  <div>
+                    <button
+                      onClick={handlePublicSale}
+                      disabled={!publicSaleOpen || isBuying}
+                      className={`w-full py-4 px-6 rounded-xl flex items-center justify-center gap-3 text-base transition-all duration-200 shadow-lg neon-border
+                        ${ publicSaleOpen
+                            ? "bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-700 hover:to-purple-700 text-white hover:shadow-pink-500/50"
+                            : ""
+                        } disabled:cursor-not-allowed`}
+                      style={!publicSaleOpen ? {
+                        background: "linear-gradient(135deg, rgba(90,15,80,0.95), rgba(70,10,60,0.95))",
+                        border: "2px solid rgba(236,72,153,0.55)",
+                        color: "#f9a8d4",
+                        boxShadow: "0 0 14px rgba(219,39,119,0.2), inset 0 0 20px rgba(157,23,77,0.1)",
+                      } : undefined}>
+                      {!publicSaleOpen ? (
+                        <><Lock className="w-5 h-5" /> Public Sale opens in {formatCountdown(publicSaleTime)}</>
+                      ) : (
+                        <><Wallet className="w-5 h-5" />
+                          {!isConnected ? "Connect Wallet to Buy" : isBuying ? "Processing…" : "Public Sale — Buy Ticket"}
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </>
+              )}
+              {(buyError || (buyDigest && !waitlistJoined)) && (
+                <div className="bg-purple-950/30 backdrop-blur-sm rounded-xl p-4 border-2 border-pink-500/30 neon-border">
+                  {buyError && (
+                    <p className="text-sm text-red-300">{buyError}</p>
+                  )}
+                  {buyDigest && !waitlistJoined && (
+                    <p className="text-sm text-green-300">
+                      Ticket minted! Tx: <span className="font-mono">{buyDigest}</span>
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
-            {!isOneChainConnected && !isSpotifyConnected && (
+            {!isConnected && !isFanVerified && (
               <p className="text-sm text-pink-300 text-center bg-purple-950/30 rounded-lg p-3 border-2 border-pink-500/30 neon-border">
-                Connect your wallet or Spotify to access
-                ticketing features
+                Connect your wallet or verify as a fan via Spotify to access ticketing features
               </p>
             )}
           </div>
         </div>
       </div>
 
-      {/* Authentication Modal */}
-      {showAuthModal && (
+      {/* Delbot Verification Modal */}
+      {showDelbot && (
+        <DelbotVerification
+          minDataPoints={50}
+          onHumanVerified={proceedWithPurchase}
+          onBotDetected={handleBotDetected}
+          onCancel={() => { setShowDelbot(false); setPendingPurchaseType(null); }}
+        />
+      )}
+
+      {/* Wallet connect modal (onechain only — Spotify is handled via redirect) */}
+      {showAuthModal && authType === "onechain" && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-gradient-to-br from-purple-950 to-indigo-950 border-2 border-pink-500/50 neon-border rounded-2xl max-w-md w-full p-6 md:p-8 shadow-2xl">
             <div className="text-center mb-6">
-              {authType === "onechain" ? (
-                <>
-                  <div className="w-16 h-16 bg-purple-600/30 border-2 border-pink-500 neon-border rounded-full flex items-center justify-center mx-auto mb-4">
-                    <Wallet className="w-8 h-8 text-pink-300" />
-                  </div>
-                  <h3 className="text-2xl text-white mb-2 neon-text">
-                    Connect OneWallet
-                  </h3>
-                  <p className="text-base text-pink-300">
-                    Connect your OneChain OneWallet to purchase
-                    tickets or join the queue
-                  </p>
-                </>
-              ) : (
-                <>
-                  <div className="w-16 h-16 bg-green-600/30 border-2 border-green-500 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <Music className="w-8 h-8 text-green-300" />
-                  </div>
-                  <h3 className="text-2xl text-white mb-2 neon-text">
-                    Connect with Spotify
-                  </h3>
-                  <p className="text-base text-pink-300">
-                    Verify your fan status by connecting your
-                    Spotify account
-                  </p>
-                </>
-              )}
+              <div className="w-16 h-16 bg-purple-600/30 border-2 border-pink-500 neon-border rounded-full flex items-center justify-center mx-auto mb-4">
+                <Wallet className="w-8 h-8 text-pink-300" />
+              </div>
+              <h3 className="text-2xl text-white mb-2 neon-text">Connect OneWallet</h3>
+              <p className="text-base text-pink-300">
+                Connect your OneChain wallet to purchase tickets or join the queue
+              </p>
             </div>
-
-            <div className="space-y-3">
-              {authType === "onechain" ? (
-                <button
-                  onClick={handleModalAuth}
-                  className="w-full bg-gradient-to-r from-pink-600 to-purple-600 text-white py-3 px-6 rounded-xl hover:from-pink-700 hover:to-purple-700 transition-all duration-200 text-base shadow-lg neon-border"
-                >
-                  Connect OneWallet
-                </button>
-              ) : (
-                <button
-                  onClick={handleModalAuth}
-                  className="w-full bg-gradient-to-r from-green-600 to-emerald-600 text-white py-3 px-6 rounded-xl hover:from-green-700 hover:to-emerald-700 transition-all duration-200 text-base shadow-lg"
-                >
-                  Connect Spotify
-                </button>
-              )}
-
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              <div id="auth-modal-connect-btn">
+                <style>{`
+                  #auth-modal-connect-btn button {
+                    color: #ffffff !important;
+                    width: 100%;
+                    background: linear-gradient(to right, #db2777, #9333ea) !important;
+                    border: 2px solid rgba(219,39,119,0.5) !important;
+                    padding: 12px 24px !important;
+                    border-radius: 12px !important;
+                    font-size: 1rem !important;
+                    font-weight: 600 !important;
+                    cursor: pointer !important;
+                    box-shadow: 0 0 16px rgba(219,39,119,0.4) !important;
+                    transition: box-shadow 0.2s, border-color 0.2s !important;
+                  }
+                  #auth-modal-connect-btn button:hover {
+                    box-shadow: 0 0 28px rgba(219,39,119,0.75), 0 0 8px rgba(147,51,234,0.5) !important;
+                    border-color: rgba(249,168,212,0.9) !important;
+                  }
+                `}</style>
+                <ConnectButton />
+              </div>
               <button
                 onClick={closeModal}
-                className="w-full bg-purple-900/50 border-2 border-pink-500/50 text-white py-3 px-6 rounded-xl hover:bg-purple-800/60 hover:border-pink-400 transition-all duration-200 text-base neon-border"
+                style={{
+                  width: "100%",
+                  background: "rgba(20,0,0,0.6)",
+                  border: "1px solid rgba(127,29,29,0.5)",
+                  color: "rgba(252,165,165,0.45)",
+                  padding: "12px 24px",
+                  borderRadius: "12px",
+                  fontSize: "0.9rem",
+                  fontWeight: 400,
+                  cursor: "pointer",
+                  letterSpacing: "0.08em",
+                  transition: "all 0.2s",
+                  textDecoration: "line-through",
+                  textDecorationColor: "rgba(239,68,68,0.4)",
+                }}
+                onMouseEnter={e => {
+                  const el = e.currentTarget;
+                  el.style.background = "rgba(40,0,0,0.75)";
+                  el.style.borderColor = "rgba(185,28,28,0.8)";
+                  el.style.color = "rgba(252,165,165,0.65)";
+                  el.style.boxShadow = "inset 0 0 20px rgba(127,29,29,0.3)";
+                }}
+                onMouseLeave={e => {
+                  const el = e.currentTarget;
+                  el.style.background = "rgba(20,0,0,0.6)";
+                  el.style.borderColor = "rgba(127,29,29,0.5)";
+                  el.style.color = "rgba(252,165,165,0.45)";
+                  el.style.boxShadow = "none";
+                }}
               >
-                Cancel
+                ⚠ Cancel
               </button>
             </div>
-
-            <p className="text-xs text-pink-400 text-center mt-4 bg-purple-950/30 rounded-lg p-2 border border-pink-500/30">
-              Authentication will be handled by the backend
-            </p>
           </div>
         </div>
       )}
