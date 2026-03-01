@@ -511,22 +511,18 @@ export default function MarketplacePage() {
               <div className="bg-indigo-950/60 backdrop-blur-md rounded-2xl p-5 border-2 border-indigo-500/30 neon-border shadow-xl">
                 <p className="text-purple-200">Loading waitlists…</p>
               </div>
+            ) : waitlistQueues.filter(wq => wq.queue.length > 0).length === 0 ? (
+              <div style={{ textAlign: "center", padding: "48px 24px", color: "#818cf8" }}>
+                <p style={{ fontSize: "1.1rem", fontWeight: 600, marginBottom: "8px" }}>No active waitlists right now</p>
+                <p style={{ fontSize: "0.85rem", color: "#6d28d9" }}>Check back later — queues will appear here when fans join</p>
+              </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {waitlistQueues.map((wq) => {
-                  const isEmpty = wq.queue.length === 0;
+                {waitlistQueues.filter(wq => wq.queue.length > 0).map((wq) => {
                   return (
                   <div
                     key={wq.objectId}
-                    style={isEmpty ? {
-                      background: "rgba(10,8,30,0.55)",
-                      border: "2px dashed rgba(99,102,241,0.18)",
-                      borderRadius: "16px",
-                      padding: "20px",
-                      boxShadow: "none",
-                      opacity: 0.7,
-                      backdropFilter: "blur(12px)",
-                    } : {
+                    style={{
                       background: "linear-gradient(135deg, rgba(49,10,90,0.75), rgba(30,10,80,0.85))",
                       border: "2px solid rgba(167,139,250,0.55)",
                       borderRadius: "16px",
@@ -536,13 +532,9 @@ export default function MarketplacePage() {
                     }}
                   >
                     <div className="flex items-center gap-2 mb-4">
-                      <Users style={{ width:"16px", height:"16px", color: isEmpty ? "#6366f1" : "#a78bfa", flexShrink:0 }} />
-                      <h3 style={{ color: isEmpty ? "#a5b4fc" : "#ffffff", fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{wq.concertName}</h3>
-                      <span style={isEmpty ? {
-                        marginLeft:"auto", fontSize:"0.7rem", whiteSpace:"nowrap",
-                        background:"rgba(30,27,75,0.6)", border:"1px solid rgba(99,102,241,0.2)",
-                        color:"#818cf8", borderRadius:"999px", padding:"2px 8px", flexShrink:0,
-                      } : {
+                      <Users style={{ width:"16px", height:"16px", color: "#a78bfa", flexShrink:0 }} />
+                      <h3 style={{ color: "#ffffff", fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{wq.concertName}</h3>
+                      <span style={{
                         marginLeft:"auto", fontSize:"0.7rem", whiteSpace:"nowrap", flexShrink:0,
                         background:"linear-gradient(135deg,rgba(16,185,129,0.25),rgba(5,150,105,0.2))",
                         border:"1px solid rgba(52,211,153,0.5)",
@@ -553,18 +545,6 @@ export default function MarketplacePage() {
                       </span>
                     </div>
 
-                    {isEmpty ? (
-                      <div style={{ borderRadius:"12px", border:"1px dashed rgba(99,102,241,0.2)", background:"rgba(15,10,40,0.3)", padding:"24px", textAlign:"center" }}>
-                        <p style={{ color:"#818cf8", fontWeight:500, marginBottom:"4px" }}>No fans waiting yet</p>
-                        <p style={{ fontSize:"0.75rem", color:"#7c3aed", marginBottom:"12px" }}>Be the first to join the line!</p>
-                        <Link
-                          to={`/concert/${wq.concertId}`}
-                          className="inline-block text-xs bg-gradient-to-r from-indigo-600 to-purple-700 text-white px-4 py-2 rounded-lg hover:from-indigo-700 hover:to-purple-800 transition-all neon-border"
-                        >
-                          Join Waitlist
-                        </Link>
-                      </div>
-                    ) : (
                       <ol className="space-y-2">
                         {wq.queue.map((entry, i) => (
                           <li
@@ -607,7 +587,7 @@ export default function MarketplacePage() {
                               {i + 1}
                             </span>
 
-                            {/* Address — flex-1 so it fills and prices column stays fixed */}
+                            {/* Address */}
                             <span style={{
                               fontFamily: "monospace",
                               fontSize: "0.72rem",
@@ -621,7 +601,7 @@ export default function MarketplacePage() {
                               {`${entry.buyer.slice(0, 10)}…${entry.buyer.slice(-6)}`}
                             </span>
 
-                            {/* Price — always in same column position */}
+                            {/* Price */}
                             <span style={{
                               fontSize: "0.72rem",
                               color: i === 0 ? "#fcd34d" : "#a5b4fc",
@@ -632,8 +612,8 @@ export default function MarketplacePage() {
                               {(parseInt(entry.escrow_balance) / 1_000_000_000).toFixed(2)} OCT
                             </span>
 
-                            {/* "Next Up" badge — fixed-width slot so price column stays aligned for all rows */}
-                            <div style={{ width: "82px", flexShrink: 0, display: "flex", justifyContent: "flex-end" }}>
+                            {/* "Next Up" badge slot */}
+                            <div style={{ width: "90px", flexShrink: 0, display: "flex", justifyContent: "flex-end" }}>
                               {i === 0 && (
                                 <span style={{
                                   display: "inline-flex",
@@ -643,6 +623,7 @@ export default function MarketplacePage() {
                                   fontWeight: 800,
                                   letterSpacing: "0.04em",
                                   textTransform: "uppercase",
+                                  whiteSpace: "nowrap",
                                   background: "linear-gradient(135deg, #f59e0b, #d97706, #b45309)",
                                   color: "#000",
                                   padding: "3px 9px",
@@ -650,7 +631,6 @@ export default function MarketplacePage() {
                                   boxShadow: "0 0 10px rgba(234,179,8,0.6), 0 0 20px rgba(234,179,8,0.25)",
                                   animation: "nextup-pulse 2s ease-in-out infinite",
                                 }}>
-                                  <style>{`@keyframes nextup-pulse { 0%,100%{box-shadow:0 0 10px rgba(234,179,8,0.6),0 0 20px rgba(234,179,8,0.25)} 50%{box-shadow:0 0 16px rgba(234,179,8,0.9),0 0 30px rgba(234,179,8,0.45)} }`}</style>
                                   👑 Next Up
                                 </span>
                               )}
@@ -658,9 +638,8 @@ export default function MarketplacePage() {
                           </li>
                         ))}
                       </ol>
-                    )}
 
-                    <p style={{ fontSize:"0.7rem", color: isEmpty ? "rgba(139,92,246,0.3)" : "rgba(167,139,250,0.4)", marginTop:"12px", textAlign:"center", fontFamily:"monospace" }}>
+                    <p style={{ fontSize:"0.7rem", color: "rgba(167,139,250,0.4)", marginTop:"12px", textAlign:"center", fontFamily:"monospace" }}>
                       {wq.objectId.slice(0, 10)}…
                     </p>
                   </div>

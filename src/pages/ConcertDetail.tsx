@@ -41,6 +41,7 @@ export default function ConcertDetail() {
   const [fanScore, setFanScore] = useState<number | null>(null);
   const [fanToken, setFanToken] = useState<string | null>(null); // HMAC token issued by backend after Spotify check
   const [spotifyLoading, setSpotifyLoading] = useState(false);
+  const [fanBtnHovered, setFanBtnHovered] = useState(false);
 
   // ── Live clock (ticks every second) ───────────────────────────────────────
   const [currentTime, setCurrentTime] = useState(() => Date.now());
@@ -508,19 +509,73 @@ export default function ConcertDetail() {
               ) : (
                 /* ─── TICKETS AVAILABLE: Normal buy buttons ─── */
                 <>
+                  {/* ── Quantity Selector (shown during fan presale AND public sale) ── */}
+                  {(fanSaleOpen || publicSaleOpen) && (
+                    <div style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      background: "linear-gradient(135deg, rgba(30,20,80,0.8), rgba(20,10,60,0.8))",
+                      border: "2px solid rgba(139,92,246,0.45)",
+                      borderRadius: "14px",
+                      padding: "12px 20px",
+                      boxShadow: "0 0 12px rgba(139,92,246,0.15)",
+                    }}>
+                      <span style={{ color: "#c4b5fd", fontWeight: 600, fontSize: "0.95rem" }}>Quantity</span>
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => setQuantity(q => Math.max(1, q - 1))}
+                          style={{ width:"32px", height:"32px", borderRadius:"50%", background:"rgba(109,40,217,0.35)", border:"1px solid rgba(139,92,246,0.5)", color:"#c4b5fd", fontSize:"1.2rem", fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer" }}
+                        >−</button>
+                        <span style={{ color:"#ffffff", fontWeight:700, width:"24px", textAlign:"center", fontSize:"1rem" }}>{quantity}</span>
+                        <button
+                          onClick={() => setQuantity(q => Math.min(concert.availableTickets, q + 1))}
+                          style={{ width:"32px", height:"32px", borderRadius:"50%", background:"rgba(109,40,217,0.35)", border:"1px solid rgba(139,92,246,0.5)", color:"#c4b5fd", fontSize:"1.2rem", fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer" }}
+                        >+</button>
+                      </div>
+                    </div>
+                  )}
+
                   {/* ── Button 1: Fan Presale (5-min head start) ── */}
-                  <div>
+                  <div style={fanSaleOpen ? {
+                    background: fanBtnHovered
+                      ? "linear-gradient(135deg, rgba(4,60,30,0.75), rgba(3,40,20,0.75))"
+                      : "linear-gradient(135deg, rgba(6,46,30,0.6), rgba(4,30,20,0.6))",
+                    border: fanBtnHovered
+                      ? "2px solid rgba(52,211,153,0.7)"
+                      : "2px solid rgba(52,211,153,0.4)",
+                    borderRadius: "14px",
+                    padding: "4px",
+                    boxShadow: fanBtnHovered
+                      ? "0 0 22px rgba(16,185,129,0.35), 0 0 40px rgba(16,185,129,0.12)"
+                      : "0 0 14px rgba(16,185,129,0.12)",
+                    transition: "all 0.2s ease",
+                  } : undefined}>
                     <button
                       onClick={handleFanPresale}
+                      onMouseEnter={() => setFanBtnHovered(true)}
+                      onMouseLeave={() => setFanBtnHovered(false)}
                       disabled={!fanSaleOpen || isBuying || spotifyLoading}
-                      className={`w-full py-4 px-6 rounded-xl flex items-center justify-center gap-3 text-base transition-all duration-200 shadow-lg neon-border
-                        ${ fanSaleOpen && isFanVerified
-                            ? "bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white hover:shadow-green-500/50"
-                            : fanSaleOpen && !isFanVerified
-                            ? "bg-gradient-to-r from-yellow-600 to-orange-600 hover:from-yellow-700 hover:to-orange-700 text-white"
-                            : "bg-purple-900/40 border-pink-500/30 text-pink-400 cursor-not-allowed opacity-70"
-                        } disabled:opacity-60 disabled:cursor-not-allowed`}
-                    >
+                      className="w-full py-4 px-6 rounded-xl flex items-center justify-center gap-3 text-base disabled:cursor-not-allowed"
+                      style={!fanSaleOpen ? {
+                        background: "linear-gradient(135deg, rgba(67,20,110,0.95), rgba(49,10,90,0.95))",
+                        border: "2px solid rgba(167,139,250,0.6)",
+                        color: "#c4b5fd",
+                        boxShadow: "0 0 14px rgba(139,92,246,0.25), inset 0 0 20px rgba(109,40,217,0.1)",
+                        transition: "all 0.2s ease",
+                      } : {
+                        background: fanBtnHovered
+                          ? "linear-gradient(135deg, #059669, #10b981, #34d399)"
+                          : "linear-gradient(135deg, #047857, #059669, #10b981)",
+                        color: "#ffffff",
+                        fontWeight: 700,
+                        border: "none",
+                        boxShadow: fanBtnHovered
+                          ? "0 0 20px rgba(16,185,129,0.7), 0 0 40px rgba(16,185,129,0.3)"
+                          : "0 0 12px rgba(16,185,129,0.4)",
+                        transform: fanBtnHovered ? "translateY(-1px)" : "translateY(0)",
+                        transition: "all 0.2s ease",
+                      }}>
                       {!fanSaleOpen ? (
                         <><Lock className="w-5 h-5" /> Fan Presale opens in {formatCountdown(fanSaleTime)}</>
                       ) : isFanVerified ? (
@@ -532,29 +587,11 @@ export default function ConcertDetail() {
                       )}
                     </button>
                     {fanSaleOpen && !isFanVerified && (
-                      <p className="text-xs text-yellow-300/70 mt-1 text-center">
+                      <p style={{ fontSize:"0.72rem", color:"#6ee7b7", textAlign:"center", padding:"6px 12px 4px", opacity:0.8 }}>
                         Scores 60+ get presale access. Your long-term listening history is checked.
                       </p>
                     )}
                   </div>
-
-                  {/* ── Quantity Selector (shown during fan presale AND public sale) ── */}
-                  {(fanSaleOpen || publicSaleOpen) && (
-                    <div className="flex items-center justify-between bg-purple-950/40 border-2 border-pink-500/30 rounded-xl px-4 py-3 neon-border">
-                      <span className="text-pink-200 text-sm font-medium">Quantity</span>
-                      <div className="flex items-center gap-3">
-                        <button
-                          onClick={() => setQuantity(q => Math.max(1, q - 1))}
-                          className="w-8 h-8 rounded-full bg-purple-800 hover:bg-purple-700 text-white text-lg font-bold flex items-center justify-center transition-colors"
-                        >−</button>
-                        <span className="text-white font-bold w-6 text-center">{quantity}</span>
-                        <button
-                          onClick={() => setQuantity(q => Math.min(concert.availableTickets, q + 1))}
-                          className="w-8 h-8 rounded-full bg-purple-800 hover:bg-purple-700 text-white text-lg font-bold flex items-center justify-center transition-colors"
-                        >+</button>
-                      </div>
-                    </div>
-                  )}
 
                   {/* ── Button 2: Public Sale ── */}
                   <div>
@@ -564,9 +601,14 @@ export default function ConcertDetail() {
                       className={`w-full py-4 px-6 rounded-xl flex items-center justify-center gap-3 text-base transition-all duration-200 shadow-lg neon-border
                         ${ publicSaleOpen
                             ? "bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-700 hover:to-purple-700 text-white hover:shadow-pink-500/50"
-                            : "bg-purple-900/40 border-pink-500/30 text-pink-400 cursor-not-allowed opacity-70"
-                        } disabled:opacity-60 disabled:cursor-not-allowed`}
-                    >
+                            : ""
+                        } disabled:cursor-not-allowed`}
+                      style={!publicSaleOpen ? {
+                        background: "linear-gradient(135deg, rgba(90,15,80,0.95), rgba(70,10,60,0.95))",
+                        border: "2px solid rgba(236,72,153,0.55)",
+                        color: "#f9a8d4",
+                        boxShadow: "0 0 14px rgba(219,39,119,0.2), inset 0 0 20px rgba(157,23,77,0.1)",
+                      } : undefined}>
                       {!publicSaleOpen ? (
                         <><Lock className="w-5 h-5" /> Public Sale opens in {formatCountdown(publicSaleTime)}</>
                       ) : (

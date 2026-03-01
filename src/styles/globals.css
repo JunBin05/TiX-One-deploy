@@ -354,6 +354,16 @@ html {
   }
 }
 
+@keyframes wl-pulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(239,68,68,0.4), 0 0 16px rgba(185,28,28,0.2); }
+  50%       { box-shadow: 0 0 18px rgba(239,68,68,0.7), 0 0 32px rgba(239,68,68,0.35); }
+}
+
+@keyframes nextup-pulse {
+  0%, 100% { box-shadow: 0 0 10px rgba(234,179,8,0.6), 0 0 20px rgba(234,179,8,0.25); }
+  50%       { box-shadow: 0 0 16px rgba(234,179,8,0.9), 0 0 30px rgba(234,179,8,0.45); }
+}
+
 .neon-text {
   animation: neon-pulse 4s ease-in-out infinite;
 }

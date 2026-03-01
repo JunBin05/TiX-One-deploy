@@ -58,6 +58,7 @@ export function ConcertCard({ concert, fanScore }: ConcertCardProps) {
   const onSaleNow = fanSaleOpen && publicSaleOpen;
 
   const soldOut = concert.availableTickets === 0;
+  const [btnHovered, setBtnHovered] = useState(false);
 
   const handleQuickBuy = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -157,55 +158,40 @@ export function ConcertCard({ concert, fanScore }: ConcertCardProps) {
         </div>
 
         {/* ── Quick Buy / Join Waitlist button ── */}
-        {soldOut ? (
-          <div style={{ marginTop: "16px" }}>
-            <span style={{ display: "none" }}><style>{`@keyframes wl-pulse { 0%,100%{box-shadow:0 0 8px rgba(239,68,68,0.4),0 0 16px rgba(185,28,28,0.2)} 50%{box-shadow:0 0 18px rgba(239,68,68,0.7),0 0 32px rgba(239,68,68,0.35)} }`}</style></span>
-            <button
-              onClick={handleQuickBuy}
-              style={{
-                width: "100%",
-                background: "linear-gradient(135deg, rgba(127,0,0,0.6), rgba(185,28,28,0.5))",
-                border: "2px solid rgba(239,68,68,0.6)",
-                borderRadius: "12px",
-                padding: "12px 16px",
-                color: "#fca5a5",
-                fontWeight: 700,
-                fontSize: "0.85rem",
-                cursor: "pointer",
-                animation: "wl-pulse 2.5s ease-in-out infinite",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "8px",
-                letterSpacing: "0.06em",
-                textTransform: "uppercase",
-              }}
-            >
-              <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#ef4444", boxShadow: "0 0 6px #ef4444", display: "inline-block", flexShrink: 0 }} />
-              Sold Out — Join Waitlist
-              <span style={{ fontSize: "0.9rem" }}>→</span>
-            </button>
-          </div>
-        ) : (
-          <button
-            onClick={handleQuickBuy}
-            style={{
-              marginTop: "16px",
-              width: "100%",
-              background: "linear-gradient(to right, #db2777, #9333ea)",
-              border: "none",
-              borderRadius: "12px",
-              padding: "12px 24px",
-              color: "#ffffff",
-              fontWeight: 700,
-              fontSize: "0.9rem",
-              cursor: "pointer",
-              boxShadow: "0 0 14px rgba(219,39,119,0.35)",
-            }}
-          >
-            Buy Tickets
-          </button>
-        )}
+        <button
+          onClick={handleQuickBuy}
+          onMouseEnter={() => setBtnHovered(true)}
+          onMouseLeave={() => setBtnHovered(false)}
+          style={{
+            marginTop: "16px",
+            width: "100%",
+            background: soldOut
+              ? btnHovered
+                ? "linear-gradient(to right, #b91c1c, #dc2626)"
+                : "linear-gradient(to right, #7f1d1d, #991b1b)"
+              : btnHovered
+                ? "linear-gradient(to right, #ec4899, #a855f7)"
+                : "linear-gradient(to right, #db2777, #9333ea)",
+            border: "none",
+            borderRadius: "12px",
+            padding: "12px 24px",
+            color: "#ffffff",
+            fontWeight: 700,
+            fontSize: "0.9rem",
+            cursor: "pointer",
+            boxShadow: soldOut
+              ? btnHovered
+                ? "0 0 22px rgba(239,68,68,0.65), 0 0 40px rgba(239,68,68,0.25)"
+                : "0 0 14px rgba(239,68,68,0.35)"
+              : btnHovered
+                ? "0 0 22px rgba(219,39,119,0.65), 0 0 40px rgba(168,85,247,0.25)"
+                : "0 0 14px rgba(219,39,119,0.35)",
+            transform: btnHovered ? "translateY(-2px)" : "translateY(0)",
+            transition: "all 0.2s ease",
+          }}
+        >
+          {soldOut ? "Sold Out — Join Waitlist" : "Buy Tickets"}
+        </button>
       </div>
     </Link>
   );
