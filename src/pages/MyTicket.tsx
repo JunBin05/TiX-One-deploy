@@ -350,6 +350,12 @@ export default function MyTicketPage() {
     run();
   }, [currentAccount, selectedTicket, signPersonalMessage]);
 
+  // ── Derived: has this concert already happened? ──────────────────────────
+  const isPastEvent = useMemo(() => {
+    if (!selectedConcert?.date) return false;
+    return new Date(selectedConcert.date) < new Date();
+  }, [selectedConcert?.date]);
+
   const formatExpiration = (timestamp: string) => {
     const date = new Date(parseInt(timestamp));
     return date.toLocaleDateString("en-US", {
@@ -483,6 +489,12 @@ export default function MyTicketPage() {
             Back
           </Link>
           <h1 className="text-lg sm:text-xl font-bold text-white neon-text">Your Ticket</h1>
+          <Link
+            to="/my-waitlists"
+            className="text-sm text-pink-300 hover:text-white transition-colors border border-pink-500/40 rounded-lg px-3 py-1.5"
+          >
+            My Waitlists
+          </Link>
         </div>
       </header>
 
@@ -500,17 +512,19 @@ export default function MyTicketPage() {
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-pink-500 mx-auto mb-4"></div>
             <p className="text-pink-200">Loading your tickets…</p>
           </div>
-        ) : tickets.length === 0 ? (
-          <div className="rounded-3xl border border-pink-500/50 bg-purple-900/40 neon-border backdrop-blur-md p-7 sm:p-8 shadow-[0_0_30px_rgba(236,72,153,0.15)] text-center">
-            <h2 className="text-2xl font-bold text-white mb-2 neon-text">No tickets found</h2>
-            <p className="text-pink-200 mb-6">You don’t own any tickets yet.</p>
-            <button onClick={() => navigate("/")} className="w-full rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 border-none shadow-[0_0_15px_rgba(236,72,153,0.4)] text-white py-3 px-6 hover:from-pink-500 hover:to-purple-500 transition-colors font-bold">
-              Buy a Ticket
-            </button>
-          </div>
         ) : (
           <>
-            {/* --- THE ORIGINAL TICKET SELECTOR --- */}
+            {tickets.length === 0 ? (
+              <div className="rounded-3xl border border-pink-500/50 bg-purple-900/40 neon-border backdrop-blur-md p-7 sm:p-8 shadow-[0_0_30px_rgba(236,72,153,0.15)] text-center">
+                <h2 className="text-2xl font-bold text-white mb-2 neon-text">No tickets found</h2>
+                <p className="text-pink-200 mb-6">You don't own any tickets yet.</p>
+                <button onClick={() => navigate("/")} className="w-full rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 border-none shadow-[0_0_15px_rgba(236,72,153,0.4)] text-white py-3 px-6 hover:from-pink-500 hover:to-purple-500 transition-colors font-bold">
+                  Buy a Ticket
+                </button>
+              </div>
+            ) : (
+              <>
+                {/* --- THE ORIGINAL TICKET SELECTOR --- */}
             {tickets.length > 1 && (
               <div className="rounded-2xl border border-pink-500/30 bg-purple-900/40 backdrop-blur-md p-4 shadow-2xl">
                 <label className="block text-xs font-bold uppercase tracking-wider text-pink-400 mb-2">Select Ticket</label>
@@ -545,7 +559,14 @@ export default function MyTicketPage() {
                   <div className="absolute bottom-4 right-4 w-10 h-10 border-b-2 border-r-2 border-pink-500/40 rounded-br-lg" />
 
                   <div className="relative z-10 px-10 py-10">
-                    <div className="text-xs font-bold tracking-[0.3em] uppercase text-pink-400 mb-3">Official Event Ticket</div>
+                    <div className="flex items-center justify-center gap-3 mb-3">
+                      <div className="text-xs font-bold tracking-[0.3em] uppercase text-pink-400">Official Event Ticket</div>
+                      {isPastEvent && (
+                        <span style={{ fontSize: "0.65rem", fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase" as const, background: "linear-gradient(135deg, #7f1d1d, #991b1b)", border: "1px solid rgba(239,68,68,0.6)", color: "#fca5a5", borderRadius: "999px", padding: "3px 10px", whiteSpace: "nowrap" as const }}>
+                          Past Event
+                        </span>
+                      )}
+                    </div>
                     <h2 className="text-3xl sm:text-4xl font-black text-white leading-tight tracking-wide">
                       {selectedConcert?.title || selectedTicket.event_name}
                     </h2>
@@ -682,13 +703,21 @@ export default function MyTicketPage() {
                   </div>
 
                   {/* 5. RESALE ACTIONS */}
-                  <div className="mt-14 rounded-2xl border border-pink-500/20 bg-purple-950/50 backdrop-blur-md p-5 shadow-xl">
-                    <div className="text-sm font-bold text-white drop-shadow-md">Resale Options</div>
-                    <div className="mt-1 text-sm text-gray-300">
-                      TiX-One enforces strict face-value resale with a price cap.
+                  {isPastEvent ? (
+                    <div className="mt-14 rounded-2xl border border-red-900/30 bg-red-950/20 backdrop-blur-md p-5 shadow-xl text-center">
+                      <div style={{ fontSize: "0.72rem", fontWeight: 800, color: "#f87171", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>
+                        Event Has Ended
+                      </div>
+                      <div className="text-sm text-gray-400">This concert has passed. Resale is no longer available.</div>
                     </div>
+                  ) : (
+                    <div className="mt-14 rounded-2xl border border-pink-500/20 bg-purple-950/50 backdrop-blur-md p-5 shadow-xl">
+                      <div className="text-sm font-bold text-white drop-shadow-md">Resale Options</div>
+                      <div className="mt-1 text-sm text-gray-300">
+                        TiX-One enforces strict face-value resale with a price cap.
+                      </div>
 
-                    {!kioskId ? (
+                      {!kioskId ? (
                       <div className="mt-4">
                         <button
                           onClick={createKiosk}
@@ -733,9 +762,12 @@ export default function MyTicketPage() {
                       </div>
                     )}
 
-                  </div>
+                    </div>
+                  )}
                 </div>
               </div>
+            )}
+              </>
             )}
           </>
         )}

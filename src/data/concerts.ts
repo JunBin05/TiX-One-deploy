@@ -13,9 +13,12 @@ export interface Concert {
   description: string;
   availableTickets: number;
   genre: string;
-  lat: number;        // Venue latitude  — used by AI tools (weather, nearby places, transit)
-  lon: number;        // Venue longitude — used by AI tools
-  airportCode: string; // Nearest IATA airport code — used by Amadeus flight search
+  lat?: number;        // Venue latitude  — used by AI tools (weather, nearby places, transit)
+  lon?: number;        // Venue longitude — used by AI tools
+  airportCode?: string; // Nearest IATA airport code — used by Amadeus flight search
+  // Sale schedule (ISO datetime strings, local time). If omitted, falls back to 14-day hardcode.
+  public_sale_time?: string | null;  // e.g. "2026-02-15T10:00:00"
+  fan_sale_time?: string | null;     // e.g. "2026-02-15T09:55:00" (fan presale, 5 min earlier)
 }
 
 export const concerts: Concert[] = [

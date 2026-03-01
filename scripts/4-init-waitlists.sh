@@ -30,24 +30,25 @@ echo "    Package   : $PACKAGE_ID"
 echo "    Admin Cap : $ADMIN_CAP_ID"
 echo ""
 
-# ---- Concert data: "supabase_id|concert_object_id|face_value_mist|artist|event_name" ----
+# ---- Concert data: "supabase_id|concert_object_id|face_value_mist|artist|event_name|concert_datetime_utc" ----
+# concert_datetime_utc format: "YYYY-MM-DD HH:MM"  (UTC) — used for expires_at (Unix ms)
 # These concert_object_ids were captured by 2-seed-concerts.sh
 declare -a DATA=(
-  "1|0xa44532d726037600dd0794a51a840f6a425da3461f20ded52cc26f687a8c1fb3|50000000|Martin Garrix|Neon Dreams Tour"
-  "2|0x3bb456f38018f41e215148220a90da3560154f9c4f4a6e67c00415701d31e238|80000000|Taylor Swift|Celestial Sound Experience"
-  "3|0xf350fb915de742726dea2b82784cad418465094842a60328ef83f9d7cdeaf603|120000000|Calvin Harris|Blockchain Beats Festival"
-  "4|0x3e82f058241e23c8721b3ba86b9955abe91511bd6ba6fd87d7f17fb1a6f82f39|40000000|Ed Sheeran|Unplugged & Unchained"
-  "5|0x2aae1bfa9195ffafec7725d65e9526789a6623c5892c415a5d62728c81124a31|70000000|Drake|Decentralized Sound Tour"
-  "6|0xb5c7361ab5e9dd8f562da45941708186c71032609bcbab9cad27a623b0a435a1|60000000|Billie Eilish|Galaxy Tour 2026"
-  "7|0xd9b7c4d17cbed32bdeae66517f1c74e5b280ef201c3efdb09720a20ce8b4f8a7|30000000|Bruno Mars|Smooth Grooves Night"
-  "8|0x2821fafeb2a82c71f438fa198493ca22fc51911e133ac1c2aceb97c9f0425553|90000000|The Weeknd|Rock Revolution Tour"
-  "9|0x560067d22b83da8ec09a846ee84b5dd3b9482bb5bbb1798d370d144782754635|100000000|Coldplay|Blockchain Classics"
-  "10|0x21b9bf9b44625881b08079fe283ee8241c2ff238ae8928b6a16610e2131cb7b4|45000000|Post Malone|Country Roads Festival"
-  "11|0x7a9b0fd2eb781618fc6ea1148ea3268ea8210370502b3d84e1c379a261abc5ef|70000000|Linkin Park|Metal Mayhem World Tour"
-  "12|0xcc083ea621785389f6946458c22ee30234c059dc37769397ebdd3f2dff154868|35000000|Rihanna|Island Rhythms Festival"
-  "13|0x0f8a5e41063bb429774befc0534ccd05394cb329176cf5514547665464cf6cd0|55000000|Shakira|Salsa Heat Night"
-  "14|0x4b27339985045ea4f9a72349269abb87fe31a63af4a1f6b5e70e426357317aa8|65000000|Dua Lipa|Techno Underground"
-  "15|0x2a4483c9e2e77bedd4bfaf29bfac5e2bb2dd528def318dedeebed27a70fb1f86|50000000|Adele|Blues Heritage Tour"
+  "1|0x5971f5df9e45735f1521a912af63a1cdba46af80cf7ecd91b0dbb9d25615c291|50000000|Martin Garrix|Neon Dreams Tour|2026-02-28 20:00"
+  "2|0x2061d3e4a091229dd0529dd13f9027da2e5dfd15a3963fc0c8cdc65095303070|80000000|Taylor Swift|Celestial Sound Experience|2026-03-14 19:30"
+  "3|0xf1811ad9a458702ecffe85104223f3969d8e46d4d8791bec7d6cb7e4fc286f74|120000000|Calvin Harris|Blockchain Beats Festival|2026-04-05 18:00"
+  "4|0x2c8fd04b39739ae0049e9e1601000f987a620ca8c571b027b0a42eae3bd9cac6|40000000|Ed Sheeran|Unplugged & Unchained|2026-04-12 20:00"
+  "5|0x3fa74a4a8ceec075b2979a0c1a99fed3539246a5201f8c07bc58dc413b28b635|70000000|Drake|Decentralized Sound Tour|2026-04-20 21:00"
+  "6|0x86659dd9d283bc3c3f8d5515aab157353a60244e6815ad4540141aec91d88d89|60000000|Billie Eilish|Galaxy Tour 2026|2026-05-01 19:00"
+  "7|0xc399dd4365c160e74cf6c2200c3acd9585b555d816eb28334193b3ffc3d14470|30000000|Bruno Mars|Smooth Grooves Night|2026-05-08 21:30"
+  "8|0xcc47a1ef7f7b365365ece68662022c5bfee027d9e55323df5a0cfcce1b493a2c|90000000|The Weeknd|Rock Revolution Tour|2026-05-15 20:00"
+  "9|0xae9298f9f3d31c24d185c3b7be9740f76eea447e9638118c9d72556f72e5c8e2|100000000|Coldplay|Blockchain Classics|2026-06-01 19:00"
+  "10|0x0e0e30697349ecbfd3bc377a6e1f457e2a384f32f5f3947fa45e00a974a2557d|45000000|Post Malone|Country Roads Festival|2026-06-10 18:30"
+  "11|0x9ba6a188ef9a92061be10c38ca952f5da30440c14a5c288ba4c94a45bdc206cd|70000000|Linkin Park|Metal Mayhem World Tour|2026-06-18 21:00"
+  "12|0x32f0f32567b9ec3ff89a714012d5d1b0a466d74e14fc5892c904ba2c6b39b706|35000000|Rihanna|Island Rhythms Festival|2026-07-04 17:00"
+  "13|0x15470e0181b4d2f822ae99e91073f6b60781a6da524fb8485942f96a6418d3f3|55000000|Shakira|Salsa Heat Night|2026-07-12 22:00"
+  "14|0x5f4e6db6e9bdc3f77eab67c18d9edb9879d71e77eadd90d2bb162d9f3ec8e734|65000000|Dua Lipa|Techno Underground|2026-07-22 23:00"
+  "15|0x688488eee54d7202390353a9efc8fdeb3355a8586009ddff1e86dd126bf4aea1|50000000|Adele|Blues Heritage Tour|2026-08-03 20:30"
 )
 
 # ---- Begin SQL file ----
@@ -66,15 +67,22 @@ SQLHEADER
 FAILED=0
 
 for entry in "${DATA[@]}"; do
-  IFS='|' read -r SUPABASE_ID CONCERT_OBJECT_ID FACE_VALUE ARTIST EVENT_NAME <<< "$entry"
+  IFS='|' read -r SUPABASE_ID CONCERT_OBJECT_ID FACE_VALUE ARTIST EVENT_NAME CONCERT_DATE <<< "$entry"
 
-  echo -n "  [$SUPABASE_ID] $EVENT_NAME ... "
+  # Convert "YYYY-MM-DD HH:MM" UTC to Unix milliseconds for expires_at
+  EXPIRES_AT=$(python3 -c "
+import calendar, datetime
+dt = datetime.datetime.strptime('$CONCERT_DATE', '%Y-%m-%d %H:%M')
+print(int(calendar.timegm(dt.timetuple())) * 1000)
+")
+
+  echo -n "  [$SUPABASE_ID] $EVENT_NAME (expires_at=${EXPIRES_AT}) ... "
 
   RESULT=$(one client call \
     --package "$PACKAGE_ID" \
     --module ticket \
     --function create_waitlist \
-    --args "$ADMIN_CAP_ID" "$CONCERT_OBJECT_ID" "$FACE_VALUE" \
+    --args "$ADMIN_CAP_ID" "$CONCERT_OBJECT_ID" "$FACE_VALUE" "$EXPIRES_AT" \
     --gas-budget 10000000 \
     --json 2>/dev/null)
 

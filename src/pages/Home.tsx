@@ -3,20 +3,17 @@ import { Pagination } from "../components/Pagination";
 import { AuthButtons } from "../components/AuthButtons";
 import { PopBackground } from "../components/PopBackground";
 import { useConcerts } from "../hooks/useConcerts";
-import { Ticket, Filter } from "lucide-react";
+import { Ticket, Filter, ChevronDown, User, ShieldCheck, Store } from "lucide-react";
 import { Link } from "react-router";
-import { useState, useMemo, useEffect } from "react";
-import { useCurrentAccount, useSuiClient } from "@mysten/dapp-kit";
-import { ADMIN_CAP_ID } from "../onechain/config";
+import { useState, useMemo, useEffect, useRef } from "react";
+import { useCurrentAccount } from "@mysten/dapp-kit";
 import { useAuth } from "../context/AuthContext";
 
 const CONCERTS_PER_PAGE = 6;
 
 export default function Home() {
   const currentAccount = useCurrentAccount();
-  const suiClient = useSuiClient();
   const { fanScores, storeFanScores } = useAuth();
-  const [isOrganizer, setIsOrganizer] = useState(false);
   const { concerts, loading: concertsLoading } = useConcerts();
 
   // Read ?fan_scores=1:72,2:0,... injected by Spotify OAuth callback
@@ -30,21 +27,21 @@ export default function Home() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const [openDropdown, setOpenDropdown] = useState<"account" | "admin" | null>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
-    let cancelled = false;
-    const checkOrganizer = async () => {
-      if (!currentAccount?.address) { setIsOrganizer(false); return; }
-      try {
-        const adminCapObj = await suiClient.getObject({ id: ADMIN_CAP_ID, options: { showOwner: true } });
-        const owner = (adminCapObj as any)?.data?.owner?.AddressOwner;
-        if (!cancelled) setIsOrganizer(owner === currentAccount.address);
-      } catch {
-        if (!cancelled) setIsOrganizer(false);
+    const handler = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setOpenDropdown(null);
       }
     };
-    checkOrganizer();
-    return () => { cancelled = true; };
-  }, [currentAccount?.address, suiClient]);
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const toggleDropdown = (name: "account" | "admin") =>
+    setOpenDropdown((prev) => (prev === name ? null : name));
 
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedMonth, setSelectedMonth] = useState<string>("all");
@@ -52,30 +49,42 @@ export default function Home() {
   const [selectedArtistOrigin, setSelectedArtistOrigin] = useState<string>("all");
   const [showFilters, setShowFilters] = useState(false);
 
-  // Extract unique values for filters
+  // Parse the full concert datetime from separate date + time fields
+  // e.g. "March 1, 2026" + "8:00 PM" → Date object at exactly that local time
+  const concertDateTime = (c: { date: string; time?: string }) =>
+    new Date(`${c.date}${c.time ? ` ${c.time}` : ""}`);
+
+  // Start of today (local) — used for dropdown filter building
+  const now = useMemo(() => { const d = new Date(); d.setHours(0,0,0,0); return d; }, []);
+
   const months = useMemo(() => {
     const uniqueMonths = new Set(
-      concerts.map((concert) => {
-        const date = new Date(concert.date);
-        return date.toLocaleDateString("en-US", { month: "long", year: "numeric" });
-      })
+      concerts
+        .filter((c) => new Date(c.date) >= now)
+        .map((concert) => {
+          const date = new Date(concert.date);
+          return date.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+        })
     );
     return Array.from(uniqueMonths).sort();
-  }, [concerts]);
+  }, [concerts, now]);
 
   const regions = useMemo(() => {
-    const uniqueRegions = new Set(concerts.map((concert) => concert.region));
+    const uniqueRegions = new Set(concerts.filter((c) => new Date(c.date) >= now).map((concert) => concert.region));
     return Array.from(uniqueRegions).sort();
-  }, [concerts]);
+  }, [concerts, now]);
 
   const artistOrigins = useMemo(() => {
-    const uniqueOrigins = new Set(concerts.map((concert) => concert.artistOrigin));
+    const uniqueOrigins = new Set(concerts.filter((c) => new Date(c.date) >= now).map((concert) => concert.artistOrigin));
     return Array.from(uniqueOrigins).sort();
-  }, [concerts]);
+  }, [concerts, now]);
 
-  // Filter concerts
+  // Filter concerts — hide any concert whose date+time has already passed
   const filteredConcerts = useMemo(() => {
+    const rightNow = new Date();
     return concerts.filter((concert: any) => {
+      if (concertDateTime(concert) < rightNow) return false; // hide past concerts
+
       const concertMonth = new Date(concert.date).toLocaleDateString("en-US", {
         month: "long",
         year: "numeric",
@@ -132,27 +141,89 @@ export default function Home() {
                 <p className="text-xs sm:text-sm text-pink-300">Blockchain-Powered Ticketing</p>
               </div>
             </div>
-            <div className="flex flex-wrap items-center justify-end gap-3">
-              <Link
-                to="/my-ticket"
-                className="px-4 py-2 rounded-lg bg-purple-900/50 border-2 border-pink-500/40 text-white hover:bg-purple-800/60 hover:border-pink-400 transition-all text-sm neon-border"
-              >
-                My Tickets
-              </Link>
+            <div className="flex items-center justify-end gap-2" ref={dropdownRef}>
+
+              {/* My Account dropdown */}
+              <div style={{ position: "relative" }}>
+                <button
+                  onClick={() => toggleDropdown("account")}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-purple-900/50 border-2 border-pink-500/40 text-white hover:bg-purple-800/60 hover:border-pink-400 transition-all text-sm neon-border"
+                >
+                  <User size={14} />
+                  My Account
+                  <ChevronDown size={13} style={{ transition: "transform 0.2s", transform: openDropdown === "account" ? "rotate(180deg)" : "rotate(0deg)" }} />
+                </button>
+                {openDropdown === "account" && (
+                  <div style={{
+                    position: "absolute", top: "calc(100% + 6px)", right: 0,
+                    background: "rgba(15,10,40,0.97)", border: "1.5px solid rgba(236,72,153,0.35)",
+                    borderRadius: 10, minWidth: 160, zIndex: 100,
+                    boxShadow: "0 8px 32px rgba(0,0,0,0.5)", overflow: "hidden",
+                  }}>
+                    <Link to="/my-ticket" onClick={() => setOpenDropdown(null)}
+                      style={{ display: "flex", alignItems: "center", gap: 8, padding: "11px 16px",
+                        color: "#e2e8f0", fontSize: 14, textDecoration: "none",
+                        borderBottom: "1px solid rgba(255,255,255,0.06)" }}
+                      className="hover:bg-purple-800/40"
+                    >
+                      🎟️ My Tickets
+                    </Link>
+                    <Link to="/my-waitlists" onClick={() => setOpenDropdown(null)}
+                      style={{ display: "flex", alignItems: "center", gap: 8, padding: "11px 16px",
+                        color: "#e2e8f0", fontSize: 14, textDecoration: "none" }}
+                      className="hover:bg-purple-800/40"
+                    >
+                      ⏳ My Waitlists
+                    </Link>
+                  </div>
+                )}
+              </div>
+
+              {/* Marketplace */}
               <Link
                 to="/marketplace"
-                className="px-4 py-2 rounded-lg bg-purple-900/50 border-2 border-pink-500/40 text-white hover:bg-purple-800/60 hover:border-pink-400 transition-all text-sm neon-border"
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-purple-900/50 border-2 border-pink-500/40 text-white hover:bg-purple-800/60 hover:border-pink-400 transition-all text-sm neon-border"
               >
+                <Store size={14} />
                 Marketplace
               </Link>
-              {isOrganizer && (
-                <Link
-                  to="/scanner"
-                  className="px-4 py-2 rounded-lg bg-purple-900/50 border-2 border-pink-500/40 text-white hover:bg-purple-800/60 hover:border-pink-400 transition-all text-sm neon-border"
+
+              {/* Admin dropdown */}
+              <div style={{ position: "relative" }}>
+                <button
+                  onClick={() => toggleDropdown("admin")}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-purple-900/50 border-2 border-pink-500/40 text-white hover:bg-purple-800/60 hover:border-pink-400 transition-all text-sm neon-border"
                 >
-                  Scanner
-                </Link>
-              )}
+                  <ShieldCheck size={14} />
+                  Admin
+                  <ChevronDown size={13} style={{ transition: "transform 0.2s", transform: openDropdown === "admin" ? "rotate(180deg)" : "rotate(0deg)" }} />
+                </button>
+                {openDropdown === "admin" && (
+                  <div style={{
+                    position: "absolute", top: "calc(100% + 6px)", right: 0,
+                    background: "rgba(15,10,40,0.97)", border: "1.5px solid rgba(236,72,153,0.35)",
+                    borderRadius: 10, minWidth: 170, zIndex: 100,
+                    boxShadow: "0 8px 32px rgba(0,0,0,0.5)", overflow: "hidden",
+                  }}>
+                    <Link to="/create-concert" onClick={() => setOpenDropdown(null)}
+                      style={{ display: "flex", alignItems: "center", gap: 8, padding: "11px 16px",
+                        color: "#e2e8f0", fontSize: 14, textDecoration: "none",
+                        borderBottom: "1px solid rgba(255,255,255,0.06)" }}
+                      className="hover:bg-purple-800/40"
+                    >
+                      🎵 Create Concert
+                    </Link>
+                    <Link to="/scanner" onClick={() => setOpenDropdown(null)}
+                      style={{ display: "flex", alignItems: "center", gap: 8, padding: "11px 16px",
+                        color: "#e2e8f0", fontSize: 14, textDecoration: "none" }}
+                      className="hover:bg-purple-800/40"
+                    >
+                      📷 Scanner
+                    </Link>
+                  </div>
+                )}
+              </div>
+
               <AuthButtons />
             </div>
           </div>

@@ -19,13 +19,18 @@ export function ConcertCard({ concert, fanScore }: ConcertCardProps) {
     return () => clearInterval(id);
   }, []);
 
-  // ── Sale window logic (mirrors ConcertDetail.tsx) ─────────────────────────
+  // ── Sale window logic ─────────────────────────────────────────────────
+  // Use DB-specified times if set, otherwise fall back to 14-day hardcode
   const publicSaleTime = (() => {
+    if ((concert as any).public_sale_time) return new Date((concert as any).public_sale_time).getTime();
     const d = new Date(concert.date);
     d.setUTCHours(10, 0, 0, 0);
     return d.getTime() - 14 * 24 * 60 * 60 * 1000;
   })();
-  const fanSaleTime    = publicSaleTime - 5 * 60 * 1000;
+  const fanSaleTime = (() => {
+    if ((concert as any).fan_sale_time) return new Date((concert as any).fan_sale_time).getTime();
+    return publicSaleTime - 5 * 60 * 1000;
+  })();
   const fanSaleOpen    = currentTime >= fanSaleTime;
   const publicSaleOpen = currentTime >= publicSaleTime;
 

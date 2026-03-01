@@ -208,3 +208,213 @@ SET concert_object_id   = '$OBJECT_ID',
     price               = '$PRICE_OCT'
 WHERE id = '$CONCERT_ID';   -- $EVENT_NAME
 
+UPDATE concerts
+SET concert_object_id   = '$OBJECT_ID',
+    artist              = '$ARTIST',
+    \"availableTickets\"  = $AVAILABLE_TICKETS,
+    price               = '$PRICE_OCT'
+WHERE id = '$CONCERT_ID';   -- $EVENT_NAME
+
+UPDATE concerts
+SET concert_object_id   = '$OBJECT_ID',
+    artist              = '$ARTIST',
+    \"availableTickets\"  = $AVAILABLE_TICKETS,
+    price               = '$PRICE_OCT'
+WHERE id = '$CONCERT_ID';   -- $EVENT_NAME
+
+UPDATE concerts
+SET concert_object_id   = '$OBJECT_ID',
+    artist              = '$ARTIST',
+    \"availableTickets\"  = $AVAILABLE_TICKETS,
+    price               = '$PRICE_OCT'
+WHERE id = '$CONCERT_ID';   -- $EVENT_NAME
+
+UPDATE concerts
+SET concert_object_id   = '$OBJECT_ID',
+    artist              = '$ARTIST',
+    \"availableTickets\"  = $AVAILABLE_TICKETS,
+    price               = '$PRICE_OCT'
+WHERE id = '$CONCERT_ID';   -- $EVENT_NAME
+
+UPDATE concerts
+SET concert_object_id   = '$OBJECT_ID',
+    artist              = '$ARTIST',
+    \"availableTickets\"  = $AVAILABLE_TICKETS,
+    price               = '$PRICE_OCT'
+WHERE id = '$CONCERT_ID';   -- $EVENT_NAME
+
+UPDATE concerts
+SET concert_object_id   = '$OBJECT_ID',
+    artist              = '$ARTIST',
+    \"availableTickets\"  = $AVAILABLE_TICKETS,
+    price               = '$PRICE_OCT'
+WHERE id = '$CONCERT_ID';   -- $EVENT_NAME
+
+UPDATE concerts
+SET concert_object_id   = '$OBJECT_ID',
+    artist              = '$ARTIST',
+    \"availableTickets\"  = $AVAILABLE_TICKETS,
+    price               = '$PRICE_OCT'
+WHERE id = '$CONCERT_ID';   -- $EVENT_NAME
+
+UPDATE concerts
+SET concert_object_id   = '$OBJECT_ID',
+    artist              = '$ARTIST',
+    \"availableTickets\"  = $AVAILABLE_TICKETS,
+    price               = '$PRICE_OCT'
+WHERE id = '$CONCERT_ID';   -- $EVENT_NAME
+
+UPDATE concerts
+SET concert_object_id   = '$OBJECT_ID',
+    artist              = '$ARTIST',
+    \"availableTickets\"  = $AVAILABLE_TICKETS,
+    price               = '$PRICE_OCT'
+WHERE id = '$CONCERT_ID';   -- $EVENT_NAME
+
+UPDATE concerts
+SET concert_object_id   = '$OBJECT_ID',
+    artist              = '$ARTIST',
+    \"availableTickets\"  = $AVAILABLE_TICKETS,
+    price               = '$PRICE_OCT'
+WHERE id = '$CONCERT_ID';   -- $EVENT_NAME
+
+UPDATE concerts
+SET concert_object_id   = '$OBJECT_ID',
+    artist              = '$ARTIST',
+    \"availableTickets\"  = $AVAILABLE_TICKETS,
+    price               = '$PRICE_OCT'
+WHERE id = '$CONCERT_ID';   -- $EVENT_NAME
+
+UPDATE concerts
+SET concert_object_id   = '$OBJECT_ID',
+    artist              = '$ARTIST',
+    \"availableTickets\"  = $AVAILABLE_TICKETS,
+    price               = '$PRICE_OCT'
+WHERE id = '$CONCERT_ID';   -- $EVENT_NAME
+
+UPDATE concerts
+SET concert_object_id   = '$OBJECT_ID',
+    artist              = '$ARTIST',
+    \"availableTickets\"  = $AVAILABLE_TICKETS,
+    price               = '$PRICE_OCT'
+WHERE id = '$CONCERT_ID';   -- $EVENT_NAME
+
+UPDATE concerts
+SET concert_object_id   = '$OBJECT_ID',
+    artist              = '$ARTIST',
+    \"availableTickets\"  = $AVAILABLE_TICKETS,
+    price               = '$PRICE_OCT'
+WHERE id = '$CONCERT_ID';   -- $EVENT_NAME
+
+UPDATE concerts
+SET concert_object_id   = '$OBJECT_ID',
+    artist              = '$ARTIST',
+    \"availableTickets\"  = $AVAILABLE_TICKETS,
+    price               = '$PRICE_OCT'
+WHERE id = '$CONCERT_ID';   -- $EVENT_NAME
+
+UPDATE concerts
+SET concert_object_id   = '$OBJECT_ID',
+    artist              = '$ARTIST',
+    \"availableTickets\"  = $AVAILABLE_TICKETS,
+    price               = '$PRICE_OCT'
+WHERE id = '$CONCERT_ID';   -- $EVENT_NAME
+
+UPDATE concerts
+SET concert_object_id   = '$OBJECT_ID',
+    artist              = '$ARTIST',
+    \"availableTickets\"  = $AVAILABLE_TICKETS,
+    price               = '$PRICE_OCT'
+WHERE id = '$CONCERT_ID';   -- $EVENT_NAME
+
+UPDATE concerts
+SET concert_object_id   = '$OBJECT_ID',
+    artist              = '$ARTIST',
+    \"availableTickets\"  = $AVAILABLE_TICKETS,
+    price               = '$PRICE_OCT'
+WHERE id = '$CONCERT_ID';   -- $EVENT_NAME
+
+UPDATE concerts
+SET concert_object_id   = '$OBJECT_ID',
+    artist              = '$ARTIST',
+    \"availableTickets\"  = $AVAILABLE_TICKETS,
+    price               = '$PRICE_OCT'
+WHERE id = '$CONCERT_ID';   -- $EVENT_NAME
+
+UPDATE concerts
+SET concert_object_id   = '$OBJECT_ID',
+    artist              = '$ARTIST',
+    \"availableTickets\"  = $AVAILABLE_TICKETS,
+    price               = '$PRICE_OCT'
+WHERE id = '$CONCERT_ID';   -- $EVENT_NAME
+
+UPDATE concerts
+SET concert_object_id   = '$OBJECT_ID',
+    artist              = '$ARTIST',
+    \"availableTickets\"  = $AVAILABLE_TICKETS,
+    price               = '$PRICE_OCT'
+WHERE id = '$CONCERT_ID';   -- $EVENT_NAME
+
+UPDATE concerts
+SET concert_object_id   = '$OBJECT_ID',
+    artist              = '$ARTIST',
+    \"availableTickets\"  = $AVAILABLE_TICKETS,
+    price               = '$PRICE_OCT'
+WHERE id = '$CONCERT_ID';   -- $EVENT_NAME
+
+UPDATE concerts
+SET concert_object_id   = '$OBJECT_ID',
+    artist              = '$ARTIST',
+    \"availableTickets\"  = $AVAILABLE_TICKETS,
+    price               = '$PRICE_OCT'
+WHERE id = '$CONCERT_ID';   -- $EVENT_NAME
+
+UPDATE concerts
+SET concert_object_id   = '$OBJECT_ID',
+    artist              = '$ARTIST',
+    \"availableTickets\"  = $AVAILABLE_TICKETS,
+    price               = '$PRICE_OCT'
+WHERE id = '$CONCERT_ID';   -- $EVENT_NAME
+
+UPDATE concerts
+SET concert_object_id   = '$OBJECT_ID',
+    artist              = '$ARTIST',
+    \"availableTickets\"  = $AVAILABLE_TICKETS,
+    price               = '$PRICE_OCT'
+WHERE id = '$CONCERT_ID';   -- $EVENT_NAME
+
+UPDATE concerts
+SET concert_object_id   = '$OBJECT_ID',
+    artist              = '$ARTIST',
+    \"availableTickets\"  = $AVAILABLE_TICKETS,
+    price               = '$PRICE_OCT'
+WHERE id = '$CONCERT_ID';   -- $EVENT_NAME
+
+UPDATE concerts
+SET concert_object_id   = '$OBJECT_ID',
+    artist              = '$ARTIST',
+    \"availableTickets\"  = $AVAILABLE_TICKETS,
+    price               = '$PRICE_OCT'
+WHERE id = '$CONCERT_ID';   -- $EVENT_NAME
+
+UPDATE concerts
+SET concert_object_id   = '$OBJECT_ID',
+    artist              = '$ARTIST',
+    \"availableTickets\"  = $AVAILABLE_TICKETS,
+    price               = '$PRICE_OCT'
+WHERE id = '$CONCERT_ID';   -- $EVENT_NAME
+
+UPDATE concerts
+SET concert_object_id   = '$OBJECT_ID',
+    artist              = '$ARTIST',
+    \"availableTickets\"  = $AVAILABLE_TICKETS,
+    price               = '$PRICE_OCT'
+WHERE id = '$CONCERT_ID';   -- $EVENT_NAME
+
+UPDATE concerts
+SET concert_object_id   = '$OBJECT_ID',
+    artist              = '$ARTIST',
+    \"availableTickets\"  = $AVAILABLE_TICKETS,
+    price               = '$PRICE_OCT'
+WHERE id = '$CONCERT_ID';   -- $EVENT_NAME
+

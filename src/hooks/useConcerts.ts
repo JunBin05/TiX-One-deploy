@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { concerts as staticConcerts } from '../data/concerts'
 import { supabase, type SupabaseConcert } from '../lib/supabase'
 
@@ -12,7 +12,7 @@ export function useConcerts() {
   const [concerts, setConcerts] = useState<SupabaseConcert[]>([])
   const [loading, setLoading] = useState(true)
 
-  const fetchConcerts = () => {
+  const fetchConcerts = useCallback(() => {
     if (!supabase) {
       setConcerts(staticConcerts.map(withDefaults))
       setLoading(false)
@@ -32,9 +32,22 @@ export function useConcerts() {
         }
         setLoading(false)
       })
-  }
+  }, [])
 
-  useEffect(() => { fetchConcerts() }, [])
+  useEffect(() => {
+    fetchConcerts()
+
+    // Realtime: refetch whenever a concert is inserted or updated
+    if (!supabase) return
+    const channel = supabase
+      .channel('concerts-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'concerts' }, () => {
+        fetchConcerts()
+      })
+      .subscribe()
+
+    return () => { supabase!.removeChannel(channel) }
+  }, [fetchConcerts])
 
   return { concerts, loading, refetch: fetchConcerts }
 }

@@ -86,15 +86,19 @@ export default function ConcertDetail() {
     }
   }, [location.hash, concert]);
 
-  // ── Sale times derived from concert date ──────────────────────────────────
-  // publicSaleTime = concert date at 10:00 UTC minus 14 days ("2 weeks before show")
+  // ── Sale times: use DB fields if set, otherwise fall back to 14-day hardcode ──────
   const publicSaleTime = (() => {
     if (!concert) return 0;
+    if ((concert as any).public_sale_time) return new Date((concert as any).public_sale_time).getTime();
     const d = new Date(concert.date);
     d.setUTCHours(10, 0, 0, 0);
     return d.getTime() - 14 * 24 * 60 * 60 * 1000;
   })();
-  const fanSaleTime = publicSaleTime - 5 * 60 * 1000; // 5-minute head start
+  const fanSaleTime = (() => {
+    if (!concert) return 0;
+    if ((concert as any).fan_sale_time) return new Date((concert as any).fan_sale_time).getTime();
+    return publicSaleTime - 5 * 60 * 1000;
+  })();
 
   // ── Countdown formatter ───────────────────────────────────────────────────
   const formatCountdown = (targetMs: number): string => {

@@ -246,7 +246,7 @@ export function useBuyTicket() {
       const [escrowCoin] = tx.splitCoins(tx.gas, [tx.pure.u64(faceValueMist)]);
       tx.moveCall({
         target: `${PACKAGE_ID}::ticket::join_waitlist`,
-        arguments: [tx.object(waitlistObjectId), escrowCoin],
+        arguments: [tx.object(waitlistObjectId), escrowCoin, tx.object(CLOCK_OBJECT_ID)],
       });
       const result = await signAndExecuteTransaction({ transaction: tx });
       const receipt = await suiClient.waitForTransaction({ digest: result.digest, options: { showEffects: true } });
@@ -274,6 +274,33 @@ export function useBuyTicket() {
       tx.moveCall({
         target: `${PACKAGE_ID}::ticket::leave_waitlist`,
         arguments: [tx.object(waitlistObjectId)],
+      });
+      const result = await signAndExecuteTransaction({ transaction: tx });
+      const receipt = await suiClient.waitForTransaction({ digest: result.digest, options: { showEffects: true } });
+      if (receipt.effects?.status?.status === "success") { setBuyDigest(result.digest); return result.digest; }
+      setBuyError(`On-chain error: ${receipt.effects?.status?.error || "unknown"}`);
+      return null;
+    } catch (e: any) { setBuyError(e?.message || "Transaction failed"); return null; }
+    finally { setIsBuying(false); }
+  };
+
+  /**
+   * Permissionless self-refund after concert expires.
+   * The buyer calls this themselves — no admin required.
+   * Only works after waitlist.expires_at has passed.
+   */
+  const claimWaitlistRefund = async (waitlistObjectId: string) => {
+    setBuyError("");
+    setBuyDigest("");
+    if (!currentAccount) { setBuyError("Connect OneWallet to continue."); return null; }
+    setIsBuying(true);
+    try {
+      const tx = new Transaction();
+      tx.setSender(currentAccount.address);
+      tx.setGasBudget(100_000_000);
+      tx.moveCall({
+        target: `${PACKAGE_ID}::ticket::claim_waitlist_refund`,
+        arguments: [tx.object(waitlistObjectId), tx.object(CLOCK_OBJECT_ID)],
       });
       const result = await signAndExecuteTransaction({ transaction: tx });
       const receipt = await suiClient.waitForTransaction({ digest: result.digest, options: { showEffects: true } });
@@ -370,6 +397,7 @@ export function useBuyTicket() {
     buyVerifiedFanTicket,
     joinWaitlist,
     leaveWaitlist,
+    claimWaitlistRefund,
     fulfillWaitlistOrder,
     sellOrListTicket,
     isBuying,

@@ -23,6 +23,7 @@ const ENotInWaitlist: u64 = 9;
 const EWaitlistEmpty: u64 = 10;
 const EWrongConcert: u64 = 11;
 const EZeroQuantity: u64 = 12;
+const ENotYetExpired: u64 = 13;
 
 const TICKET_PRICE: u64 = 100_000_000; // 0.1 OCT with 9 decimals
 
@@ -75,11 +76,13 @@ public struct WaitlistEntry has store {
 
 /// Shared object — one per concert.
 /// `face_value` is the required deposit (= original ticket price).
+/// `expires_at` is the concert start time in Unix ms — queue locks after this.
 /// `queue` is FIFO: index 0 is the next-to-be-served buyer.
 public struct Waitlist has key {
     id: UID,
     concert_id: ID,
     face_value: u64,
+    expires_at: u64,          // Unix timestamp in ms — concert start time
     queue: vector<WaitlistEntry>,
 }
 
@@ -183,16 +186,19 @@ public fun create_concert(
 // =========================================================
 /// Admin-only: create a shared Waitlist for a concert.
 /// `face_value` must match the ticket price so escrow amounts are exact.
+/// `expires_at` is the Unix timestamp in ms when the concert starts (queue locks).
 public fun create_waitlist(
     _: &AdminCap,
     concert: &Concert,
     face_value: u64,
+    expires_at: u64,
     ctx: &mut TxContext,
 ) {
     transfer::share_object(Waitlist {
         id: object::new(ctx),
         concert_id: object::id(concert),
         face_value,
+        expires_at,
         queue: vector::empty(),
     });
 }
@@ -499,12 +505,15 @@ public fun safe_list_ticket(
 
 /// Join the waitlist for a sold-out concert.
 /// The caller must send exactly `waitlist.face_value` OCT as escrow.
+/// Aborts with ETicketExpired if the concert has already started.
 /// Their position in the queue (1-based) is emitted on-chain.
 public fun join_waitlist(
     waitlist: &mut Waitlist,
     payment: Coin<0x2::oct::OCT>,
+    clock: &Clock,
     ctx: &mut TxContext,
 ) {
+    assert!(clock::timestamp_ms(clock) < waitlist.expires_at, ETicketExpired);
     assert!(coin::value(&payment) == waitlist.face_value, EIncorrectAmount);
 
     let buyer = ctx.sender();
@@ -552,6 +561,63 @@ public fun leave_waitlist(
         concert_id: waitlist.concert_id,
         buyer: caller,
     });
+}
+
+/// Permissionless self-refund: any queued buyer can call this themselves
+/// after the concert has started (clock >= expires_at).
+/// No admin needed — each user pulls their own deposit back.
+public fun claim_waitlist_refund(
+    waitlist: &mut Waitlist,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    assert!(clock::timestamp_ms(clock) >= waitlist.expires_at, ENotYetExpired);
+    let caller = ctx.sender();
+    let len = waitlist.queue.length();
+    let mut i = 0u64;
+    let mut found = false;
+
+    while (i < len && !found) {
+        if (waitlist.queue.borrow(i).buyer == caller) {
+            found = true;
+        } else {
+            i = i + 1;
+        };
+    };
+
+    assert!(found, ENotInWaitlist);
+
+    let WaitlistEntry { buyer, escrow_balance } = waitlist.queue.remove(i);
+    let refund = coin::from_balance(escrow_balance, ctx);
+    transfer::public_transfer(refund, buyer);
+
+    one::event::emit(WaitlistLeft {
+        waitlist_id: object::id(waitlist),
+        concert_id: waitlist.concert_id,
+        buyer: caller,
+    });
+}
+
+/// Admin-only: batch-refund remaining waitlist entries after concert starts.
+/// Call repeatedly with batch_size=50 until the queue is empty.
+/// Asserts that the concert has already started (clock >= expires_at).
+public fun admin_batch_refund_waitlist(
+    _admin: &AdminCap,
+    waitlist: &mut Waitlist,
+    batch_size: u64,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    assert!(clock::timestamp_ms(clock) >= waitlist.expires_at, ENotYetExpired);
+    let len = waitlist.queue.length();
+    let iterations = if (batch_size < len) { batch_size } else { len };
+    let mut i = 0u64;
+    while (i < iterations) {
+        let WaitlistEntry { buyer, escrow_balance } = waitlist.queue.remove(0);
+        let refund = coin::from_balance(escrow_balance, ctx);
+        transfer::public_transfer(refund, buyer);
+        i = i + 1;
+    };
 }
 
 /// Fulfill the first waitlist order (FIFO).
