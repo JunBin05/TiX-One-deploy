@@ -177,7 +177,7 @@ app.post('/api/create-squad', async (req, res) => {
       name: baseName,
       type: ChannelType.GuildText,
       topic,
-      reason: `TiX-One create-squad for ticketId=${ticketId}`,
+      reason: `TiX-One create-squad for squadId=${squadId}`,
     });
 
     // Optional: ensure the bot can create invites and send messages.

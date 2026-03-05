@@ -54,6 +54,9 @@ export default function SquadMatchingLobby() {
   const [analyzing, setAnalyzing] = useState(false);
   const [matched, setMatched] = useState<MatchedSquad[]>([]);
   const [showMatches, setShowMatches] = useState(false);
+  const [showCreatePrompt, setShowCreatePrompt] = useState(false);
+  const [newSquadName, setNewSquadName] = useState("");
+  const [isCreating, setIsCreating] = useState(false);
 
   const [allSquads, setAllSquads] = useState<Squad[]>([]);
   const [loadingSquads, setLoadingSquads] = useState(true);
@@ -118,18 +121,30 @@ export default function SquadMatchingLobby() {
 
   /* ── AI Analyze (Gemini) ── */
   const handleAnalyze = async () => {
+    // 1. Initial validation and state reset
     if (!vibeText.trim() || !supabase) return;
     setAnalyzing(true);
     setShowMatches(false);
+    setShowCreatePrompt(false);
+
+    // 2. Empty Database Check: Skip AI entirely if no squads exist yet
+    if (allSquads.length === 0) {
+      setMatched([]);
+      setShowMatches(true);
+      setShowCreatePrompt(true);
+      setAnalyzing(false);
+      return;
+    }
 
     try {
       const apiKey = import.meta.env.VITE_GEMINI_API_KEY as string;
       if (!apiKey) throw new Error("Missing VITE_GEMINI_API_KEY");
 
       const genAI = new GoogleGenerativeAI(apiKey);
+      // Using gemini-1.5-flash for maximum JSON stability
       const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
-      // Build a compact squad list for the prompt
+      // Build a compact squad list for the AI to analyze
       const squadSummaries = allSquads
         .map((sq) => `id:${sq.id} | name:${sq.name} | vibe:${sq.vibe}`)
         .join("\n");
@@ -141,21 +156,29 @@ User's vibe: "${vibeText}"
 Available squads:
 ${squadSummaries}
 
-Analyze the user's vibe against every squad listed above. Return a JSON array (no markdown, no code block) of ALL squads with the following fields:
+Analyze the user's vibe against every squad listed above. 
+Return a JSON array of ALL squads with the following fields:
 - id (string)
 - matchScore (integer 1-99)
-- reason (1 short sentence explaining the match)
+- reason (1 short sentence explaining the match, max 15 words)
 
-Order the array by matchScore descending.`;
+IMPORTANT: Return ONLY the JSON array. If you use quotes inside the "reason", you MUST escape them with a backslash (e.g. \\").`;
 
       const result = await model.generateContent(prompt);
       const rawText = result.response.text().trim();
 
-      // Strip any accidental markdown fences
-      const jsonText = rawText.replace(/^```[\w]*\n?/, "").replace(/\n?```$/, "").trim();
+      // 3. Robust JSON Extraction: Finds the array even if AI adds conversational text
+      const startBracket = rawText.indexOf('[');
+      const endBracket = rawText.lastIndexOf(']');
+      
+      if (startBracket === -1 || endBracket === -1) {
+        throw new Error("AI did not return a valid JSON array");
+      }
+
+      const jsonText = rawText.substring(startBracket, endBracket + 1);
       const parsed: { id: string; matchScore: number; reason: string }[] = JSON.parse(jsonText);
 
-      // Merge Gemini scores back onto the full squad objects
+      // 4. Merge Gemini scores back onto the full squad objects from state
       const scoreMap = new Map(parsed.map((p) => [p.id, p]));
       const scored: MatchedSquad[] = allSquads
         .map((sq) => {
@@ -168,12 +191,72 @@ Order the array by matchScore descending.`;
         })
         .sort((a, b) => b.matchScore - a.matchScore);
 
-      setMatched(scored.slice(0, 3));
+      const top3 = scored.slice(0, 3);
+      setMatched(top3);
       setShowMatches(true);
+
+      // 5. Low Match Fallback: If top match is weak, suggest creating a new squad
+      if (top3.length === 0 || top3[0].matchScore < 40) {
+        setShowCreatePrompt(true);
+      }
     } catch (err) {
       console.error("AI analysis error:", err);
+      // Friendly alert for demo stability
+      alert("AI matching had a small glitch. Please click Analyze again!");
     } finally {
       setAnalyzing(false);
+    }
+  };
+
+  /* ── Create Squad ── */
+  const handleCreateSquad = async () => {
+    if (!supabase || !walletAddress || !newSquadName.trim()) return;
+    setIsCreating(true);
+    try {
+      // Step A: Insert new squad into Supabase
+      const { data: squad, error } = await supabase
+        .from("squads")
+        .insert({ concert_id: concertId, name: newSquadName.trim(), vibe: vibeText, max_members: 5 })
+        .select()
+        .single();
+      if (error || !squad) throw error;
+
+      // Step B: Create Discord channel via backend
+      const backendUrl = import.meta.env.VITE_BACKEND_URL as string;
+      if (backendUrl) {
+        await fetch(`${backendUrl}/api/create-squad`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ squadId: squad.id, concertId, concertName }),
+        }).catch((e) => console.warn("[squad] Discord channel creation failed:", e));
+      }
+
+      // Step C: Add user as first member
+      await supabase.from("squad_members").insert({
+        squad_id: squad.id,
+        wallet: walletAddress,
+        bio: vibeText,
+      });
+
+      // Step D: Open Discord channel (invite_url written by backend)
+      const { data: fresh } = await supabase
+        .from("squads")
+        .select("invite_url")
+        .eq("id", squad.id)
+        .single();
+      if (fresh?.invite_url) {
+        window.open(fresh.invite_url, "_blank");
+      } else {
+        alert("Your Discord room is being set up — check back in a moment!");
+      }
+
+      // Step E: Navigate to squad room
+      navigate(`/squad/${squad.id}`, { state: { concertName, concertId } });
+    } catch (err) {
+      console.error("Create squad error:", err);
+      alert("Failed to create squad. Please try again.");
+    } finally {
+      setIsCreating(false);
     }
   };
 
@@ -191,7 +274,15 @@ Order the array by matchScore descending.`;
         .maybeSingle();
 
       if (existing) {
-        // Already a member, go directly to room
+        // Already a member — open Discord and go to room
+        const { data: squadData } = await supabase
+          .from("squads")
+          .select("invite_url")
+          .eq("id", squadId)
+          .single();
+        if (squadData?.invite_url) {
+          window.open(squadData.invite_url, "_blank");
+        }
         navigate(`/squad/${squadId}`, {
           state: { concertName, concertId },
         });
@@ -204,6 +295,17 @@ Order the array by matchScore descending.`;
         bio: vibeText || "",
       });
       if (error) throw error;
+
+      const { data: squadData } = await supabase
+        .from("squads")
+        .select("invite_url")
+        .eq("id", squadId)
+        .single();
+      if (squadData?.invite_url) {
+        window.open(squadData.invite_url, "_blank");
+      } else {
+        alert("Your Discord room is being set up — check back in a moment!");
+      }
 
       navigate(`/squad/${squadId}`, {
         state: { concertName, concertId },
@@ -468,6 +570,54 @@ Order the array by matchScore descending.`;
                     </motion.div>
                   );
                 })}
+              </div>
+            </motion.section>
+          )}
+
+          {/* ── Create Your Own Squad card ── */}
+          {showMatches && showCreatePrompt && (
+            <motion.section
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="space-y-4"
+            >
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-pink-400" />
+                <h3 className="font-display font-semibold text-xl text-white">
+                  {matched.length === 0 ? "Be the First! Create a Squad" : "No Perfect Match? Start Your Own"}
+                </h3>
+              </div>
+              <div className="relative group">
+                <div className="absolute -inset-0.5 bg-gradient-to-r from-pink-500 to-purple-500 rounded-3xl blur opacity-20 group-hover:opacity-40 transition duration-700" />
+                <div className="relative glass-card p-6 border-pink-500/20 space-y-4">
+                  <p className="text-sm text-white/60">
+                    {matched.length === 0
+                      ? "You're the first fan here! Name your squad and set the vibe for everyone who follows."
+                      : "None of the existing squads felt right? Create your own and let others find you."}
+                  </p>
+                  <div className="flex gap-3">
+                    <input
+                      type="text"
+                      value={newSquadName}
+                      onChange={(e) => setNewSquadName(e.target.value)}
+                      maxLength={50}
+                      placeholder="e.g., Front Row Fanatics 🔥"
+                      className="flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder:text-white/20 focus:outline-none focus:border-pink-500/50 transition-all"
+                    />
+                    <button
+                      onClick={handleCreateSquad}
+                      disabled={isCreating || !newSquadName.trim()}
+                      className="px-6 py-3 bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 rounded-xl text-sm font-bold text-white shadow-lg shadow-pink-500/20 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 whitespace-nowrap"
+                    >
+                      {isCreating ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <UserPlus className="w-4 h-4" />
+                      )}
+                      {isCreating ? "Creating…" : "Create & Join"}
+                    </button>
+                  </div>
+                </div>
               </div>
             </motion.section>
           )}

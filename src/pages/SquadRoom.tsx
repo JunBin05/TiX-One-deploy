@@ -1,40 +1,35 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useNavigate, useParams, useLocation } from "react-router";
 import { useCurrentAccount } from "@mysten/dapp-kit";
 import {
   ArrowLeft,
-  Hash,
+  ExternalLink,
   Loader2,
   LogOut,
-  Paperclip,
-  Star,
+  RefreshCw,
+  Sparkles,
   Users,
-  Phone,
-  Video,
-  Smile,
+  Zap,
 } from "lucide-react";
+import { motion } from "motion/react";
 import { supabase } from "../lib/supabase";
 
 /* ─── Types ─── */
-interface Member {
-  id: string;
-  wallet: string;
-  bio: string;
-}
-
-interface Message {
-  id: string;
-  sender: string;
-  content: string;
-  created_at: string;
-}
-
 interface SquadInfo {
   id: string;
   name: string;
   vibe: string;
   concert_id: string;
   max_members: number;
+  discord_channel_id: string | null;
+  invite_url: string | null;
+}
+
+interface Member {
+  id: string;
+  wallet: string;
+  bio: string;
+  joined_at: string;
 }
 
 /* ─── Page ─── */
@@ -45,126 +40,67 @@ export default function SquadRoom() {
   const currentAccount = useCurrentAccount();
   const walletAddress = currentAccount?.address || "";
 
+  const { concertName } = (location.state as any) || {};
+
   const [squad, setSquad] = useState<SquadInfo | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [newMessage, setNewMessage] = useState("");
   const [loading, setLoading] = useState(true);
-  const [sending, setSending] = useState(false);
   const [leaving, setLeaving] = useState(false);
-
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const chatContainerRef = useRef<HTMLDivElement>(null);
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
+  const [polling, setPolling] = useState(false);
 
   /* ── Fetch squad data ── */
-  useEffect(() => {
+  /* ── Fetch squad data ── */
+  const fetchSquad = useCallback(async () => {
     if (!squadId || !supabase) return;
-
-    const fetchData = async () => {
-      setLoading(true);
-      try {
-        const { data: squadData } = await supabase
-          .from("squads")
-          .select("*")
-          .eq("id", squadId)
-          .single();
-        if (squadData) setSquad(squadData);
-
-        const { data: membersData } = await supabase
+    try {
+      const [{ data: squadData }, { data: membersData }] = await Promise.all([
+        supabase.from("squads").select("*").eq("id", squadId).single(),
+        supabase
           .from("squad_members")
           .select("*")
           .eq("squad_id", squadId)
-          .order("joined_at", { ascending: true });
-        if (membersData) setMembers(membersData);
-
-        const { data: messagesData } = await supabase
-          .from("squad_messages")
-          .select("*")
-          .eq("squad_id", squadId)
-          .order("created_at", { ascending: true });
-        if (messagesData) setMessages(messagesData);
-      } catch (err) {
-        console.error("Failed to load squad room:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchData();
-
-    const channel = supabase
-      .channel(`squad-${squadId}`)
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "squad_messages", filter: `squad_id=eq.${squadId}` },
-        (payload: any) => {
-          const newMsg = payload.new as Message;
-          setMessages((prev) => {
-            if (prev.find((m) => m.id === newMsg.id)) return prev;
-            return [...prev, newMsg];
-          });
-        }
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "squad_members", filter: `squad_id=eq.${squadId}` },
-        () => {
-          supabase
-            .from("squad_members")
-            .select("*")
-            .eq("squad_id", squadId)
-            .order("joined_at", { ascending: true })
-            .then(({ data }) => {
-              if (data) setMembers(data);
-            });
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+          .order("joined_at", { ascending: true }),
+      ]);
+      if (squadData) setSquad(squadData);
+      if (membersData) setMembers(membersData);
+    } catch (err) {
+      console.error("Failed to load squad room:", err);
+    }
   }, [squadId]);
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+    const init = async () => {
+      setLoading(true);
+      await fetchSquad();
+      setLoading(false);
+    };
+    init();
+  }, [fetchSquad]);
+
+  /* ── Poll until invite_url is ready (backend may still be creating) ── */
+  useEffect(() => {
+    if (!squad || squad.invite_url) return;
+    setPolling(true);
+    const interval = setInterval(async () => {
+      if (!supabase || !squadId) return;
+      const { data } = await supabase
+        .from("squads")
+        .select("invite_url, discord_channel_id")
+        .eq("id", squadId)
+        .single();
+      if (data?.invite_url) {
+        setSquad((prev) => (prev ? { ...prev, ...data } : prev));
+        setPolling(false);
+        clearInterval(interval);
+      }
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [squad?.invite_url, squadId]);
 
   /* ── Handlers ── */
-  const handleSend = async () => {
-    if (!newMessage.trim() || !supabase || !squadId || !walletAddress) return;
-    setSending(true);
-    const text = newMessage.trim();
-    setNewMessage("");
-    try {
-      const { data, error } = await supabase
-        .from("squad_messages")
-        .insert({ squad_id: squadId, sender: walletAddress, content: text })
-        .select()
-        .single();
-      if (error) throw error;
-      // Add optimistically — realtime deduplication will skip if subscription also fires
-      if (data) {
-        setMessages((prev) =>
-          prev.find((m) => m.id === data.id) ? prev : [...prev, data as Message]
-        );
-      }
-    } catch (err) {
-      console.error("Send error:", err);
-      setNewMessage(text); // restore on failure
-    } finally {
-      setSending(false);
-    }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
+  const handleOpenDiscord = () => {
+    if (squad?.invite_url) {
+      window.open(squad.invite_url, "_blank");
     }
   };
 
@@ -173,7 +109,11 @@ export default function SquadRoom() {
     if (!window.confirm("Are you sure you want to leave this squad?")) return;
     setLeaving(true);
     try {
-      await supabase.from("squad_members").delete().eq("squad_id", squadId).eq("wallet", walletAddress);
+      await supabase
+        .from("squad_members")
+        .delete()
+        .eq("squad_id", squadId)
+        .eq("wallet", walletAddress);
       navigate(-1);
     } catch (err) {
       console.error("Leave error:", err);
@@ -184,29 +124,16 @@ export default function SquadRoom() {
   };
 
   /* ── Helpers ── */
-  const shortenWallet = (w: string) => (w.length > 12 ? `${w.slice(0, 6)}…${w.slice(-4)}` : w);
+  const shortenWallet = (w: string) =>
+    w.length > 12 ? `${w.slice(0, 6)}…${w.slice(-4)}` : w;
 
-  const formatTime = (ts: string) => {
-    return new Date(ts).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
-  };
-
-  const formatDate = (ts: string) => {
-    const d = new Date(ts);
-    const today = new Date();
-    if (d.toDateString() === today.toDateString()) return "Today";
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
-    if (d.toDateString() === yesterday.toDateString()) return "Yesterday";
-    return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-  };
-
-  const getAvatarColor = (wallet: string) => {
+  const getAvatarGradient = (wallet: string) => {
     const gradients = [
-      "linear-gradient(135deg, #8b5cf6, #4f46e5)", // violet-indigo
-      "linear-gradient(135deg, #ec4899, #e11d48)", // pink-rose
-      "linear-gradient(135deg, #10b981, #0d9488)", // emerald-teal
-      "linear-gradient(135deg, #f59e0b, #ea580c)", // amber-orange
-      "linear-gradient(135deg, #06b6d4, #2563eb)", // cyan-blue
+      "from-violet-500 to-indigo-600",
+      "from-pink-500 to-rose-600",
+      "from-emerald-500 to-teal-600",
+      "from-amber-500 to-orange-600",
+      "from-cyan-500 to-blue-600",
     ];
     let hash = 0;
     for (let i = 0; i < wallet.length; i++) {
@@ -215,190 +142,179 @@ export default function SquadRoom() {
     return gradients[Math.abs(hash) % gradients.length];
   };
 
-  const groupedMessages = messages.reduce<{ date: string; msgs: Message[] }[]>((acc, msg) => {
-    const dateStr = formatDate(msg.created_at);
-    const lastGroup = acc[acc.length - 1];
-    if (lastGroup && lastGroup.date === dateStr) {
-      lastGroup.msgs.push(msg);
-    } else {
-      acc.push({ date: dateStr, msgs: [msg] });
-    }
-    return acc;
-  }, []);
-
-  const groupBySender = (msgs: Message[]) => {
-    const groups: { sender: string; messages: Message[] }[] = [];
-    for (const msg of msgs) {
-      const last = groups[groups.length - 1];
-      if (last && last.sender === msg.sender) {
-        last.messages.push(msg);
-      } else {
-        groups.push({ sender: msg.sender, messages: [msg] });
-      }
-    }
-    return groups;
-  };
-
   if (loading) {
     return (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", backgroundColor: "#0d0a1a" }}>
+      <div className="flex items-center justify-center h-screen bg-[#0d0a1a]">
         <Loader2 className="w-10 h-10 animate-spin text-purple-500" />
       </div>
     );
   }
 
+  if (!squad) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen bg-[#0d0a1a] text-white gap-4">
+        <p className="text-white/50">Squad not found.</p>
+        <button
+          onClick={() => navigate(-1)}
+          className="flex items-center gap-2 text-sm text-purple-400 hover:text-purple-300 transition-colors"
+        >
+          <ArrowLeft className="w-4 h-4" /> Go Back
+        </button>
+      </div>
+    );
+  }
+
   return (
-    <div style={{ display: "flex", flexDirection: "row", height: "100vh", overflow: "hidden", backgroundColor: "#0d0a1a", color: "white", fontFamily: "sans-serif" }}>
-      
-      {/* ═══ LEFT SIDEBAR ═══ */}
-      <div className="hidden md:flex" style={{ display: "flex", flexDirection: "column", width: "280px", flexShrink: 0, backgroundColor: "#130f2a", borderRight: "1px solid rgba(255,255,255,0.05)" }}>
-        
-        {/* Top Avatars */}
-        <div style={{ padding: "16px", paddingBottom: "8px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px" }}>
-            <Users size={16} color="rgba(168, 85, 247, 0.5)" />
-            <div style={{ display: "flex", marginLeft: "4px" }}>
-              {members.slice(0, 4).map((m, i) => (
-                <div key={m.id} style={{ width: "28px", height: "28px", borderRadius: "50%", background: getAvatarColor(m.wallet), display: "flex", alignItems: "center", justifyContent: "center", fontSize: "10px", fontWeight: "bold", border: "2px solid #130f2a", marginLeft: i > 0 ? "-8px" : "0" }}>
-                  {m.wallet.slice(2, 4).toUpperCase()}
+    <div className="min-h-screen bg-[#0d0a1a] text-white font-sans">
+      {/* Fixed background blurs */}
+      <div className="fixed top-0 right-0 w-[500px] h-[500px] bg-purple-600/10 blur-[120px] rounded-full -mr-64 -mt-64 pointer-events-none" />
+      <div className="fixed bottom-0 left-0 w-[500px] h-[500px] bg-pink-600/10 blur-[120px] rounded-full -ml-64 -mb-64 pointer-events-none" />
+
+      <div className="relative max-w-3xl mx-auto px-6 py-10 space-y-8">
+
+        {/* Back */}
+        <button
+          onClick={() => navigate(-1)}
+          className="flex items-center gap-2 text-sm text-white/50 hover:text-white transition-colors"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Back to Lobby
+        </button>
+
+        {/* Squad Header Card */}
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="relative group"
+        >
+          <div className="absolute -inset-0.5 bg-gradient-to-r from-purple-500 to-pink-500 rounded-3xl blur opacity-20 group-hover:opacity-40 transition duration-700" />
+          <div className="relative glass-card p-8 border-white/20 space-y-4">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-center gap-4">
+                <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-purple-500/20">
+                  <Zap className="w-8 h-8 text-white fill-white" />
                 </div>
-              ))}
+                <div>
+                  <h1 className="font-display font-bold text-2xl text-white">{squad.name}</h1>
+                  <p className="text-sm text-white/40 mt-0.5">{concertName || "Concert Squad"}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="text-xs text-emerald-400 font-medium">{members.length}/{squad.max_members} members</span>
+              </div>
+            </div>
+
+            <p className="text-sm text-white/60 leading-relaxed">{squad.vibe}</p>
+
+            {/* Discord CTA */}
+            <div className="pt-2">
+              {squad.invite_url ? (
+                <button
+                  onClick={handleOpenDiscord}
+                  className="w-full flex items-center justify-center gap-3 px-6 py-4 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 rounded-2xl text-base font-bold text-white shadow-lg shadow-purple-500/30 transition-all active:scale-[0.98]"
+                >
+                  <svg viewBox="0 0 24 24" className="w-5 h-5 fill-white" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03z" />
+                  </svg>
+                  Open Discord Room
+                  <ExternalLink className="w-4 h-4 opacity-60" />
+                </button>
+              ) : (
+                <div className="w-full flex items-center justify-center gap-3 px-6 py-4 bg-white/5 border border-white/10 rounded-2xl text-sm text-white/40">
+                  {polling ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Setting up your Discord room…
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="w-4 h-4" />
+                      Discord room not ready yet —&nbsp;
+                      <button
+                        onClick={fetchSquad}
+                        className="text-purple-400 hover:text-purple-300 underline text-xs"
+                      >
+                        Refresh
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
           </div>
-        </div>
+        </motion.div>
 
-        {/* Members List */}
-        <div style={{ flex: 1, overflowY: "auto", padding: "0 12px" }}>
-          <div style={{ fontSize: "10px", fontWeight: "bold", textTransform: "uppercase", letterSpacing: "1px", color: "rgba(168, 85, 247, 0.4)", marginBottom: "8px", paddingLeft: "4px" }}>
-            Members — {members.length}/{squad?.max_members || 5}
+        {/* Members Section */}
+        <motion.section
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+          className="space-y-4"
+        >
+          <div className="flex items-center gap-2">
+            <Users className="w-5 h-5 text-purple-400" />
+            <h2 className="font-display font-semibold text-lg text-white">Squad Members</h2>
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+
+          <div className="space-y-2">
             {members.map((m) => (
-              <div key={m.id} style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: "10px", padding: "8px", borderRadius: "8px", cursor: "pointer" }} onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "rgba(168, 85, 247, 0.1)")} onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}>
-                <div style={{ width: "26px", height: "26px", borderRadius: "50%", background: getAvatarColor(m.wallet), flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "9px", fontWeight: "bold" }}>
+              <div
+                key={m.id}
+                className="flex items-center gap-4 p-4 glass-card border-white/10 hover:bg-white/5 transition-colors"
+              >
+                <div
+                  className={`w-10 h-10 rounded-xl bg-gradient-to-br ${getAvatarGradient(m.wallet)} flex items-center justify-center text-xs font-bold text-white shrink-0`}
+                >
                   {m.wallet.slice(2, 4).toUpperCase()}
                 </div>
-                <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-                  <div style={{ fontSize: "12px", fontWeight: "500", color: "rgba(255,255,255,0.8)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {shortenWallet(m.wallet)} {m.wallet === walletAddress && <span style={{ color: "#a855f7", fontSize: "10px" }}>(you)</span>}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-white">{shortenWallet(m.wallet)}</span>
+                    {m.wallet === walletAddress && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 font-bold">
+                        you
+                      </span>
+                    )}
                   </div>
                   {m.bio && (
-                    <div style={{ fontSize: "11px", color: "rgba(168, 85, 247, 0.4)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{m.bio}</div>
+                    <p className="text-xs text-white/40 truncate mt-0.5">{m.bio}</p>
                   )}
+                </div>
+                <div className="flex items-center gap-1.5 text-[10px] text-emerald-400/80">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                  Online
                 </div>
               </div>
             ))}
           </div>
-        </div>
+        </motion.section>
 
-        {/* Leave Button */}
-        <div style={{ padding: "16px", borderTop: "1px solid rgba(168, 85, 247, 0.1)" }}>
-          <button onClick={handleLeave} disabled={leaving} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px", padding: "10px", borderRadius: "8px", color: "rgba(248, 113, 113, 0.8)", backgroundColor: "rgba(248, 113, 113, 0.05)", border: "none", cursor: "pointer", fontSize: "13px", fontWeight: "500" }}>
-            {leaving ? <Loader2 size={16} className="animate-spin" /> : <LogOut size={16} />}
+        {/* Info note */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.2 }}
+          className="flex items-start gap-3 p-4 rounded-2xl bg-indigo-500/10 border border-indigo-500/20"
+        >
+          <Sparkles className="w-4 h-4 text-indigo-400 mt-0.5 shrink-0" />
+          <p className="text-xs text-indigo-200/70 leading-relaxed">
+            Squad chat lives in Discord. Click <strong className="text-indigo-300">Open Discord Room</strong> above to chat with your squad, share plans, and vibe together before the show!
+          </p>
+        </motion.div>
+
+        {/* Leave */}
+        <div className="flex justify-center pt-4">
+          <button
+            onClick={handleLeave}
+            disabled={leaving}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 transition-colors text-sm font-medium disabled:opacity-50"
+          >
+            {leaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <LogOut className="w-4 h-4" />}
             {leaving ? "Leaving…" : "Leave Squad"}
           </button>
         </div>
-      </div>
 
-      {/* ═══ CHAT PANEL ═══ */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, backgroundColor: "#0d0a1a" }}>
-        
-        {/* Header */}
-        <div style={{ display: "flex", flexDirection: "row", alignItems: "center", justifyContent: "space-between", height: "64px", flexShrink: 0, padding: "0 24px", backgroundColor: "#13102b", borderBottom: "1px solid rgba(168, 85, 247, 0.1)" }}>
-          <div style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: "12px" }}>
-            <button onClick={() => navigate(-1)} style={{ background: "none", border: "none", color: "rgba(168, 85, 247, 0.6)", cursor: "pointer" }}>
-              <ArrowLeft size={18} />
-            </button>
-            <div style={{ width: "36px", height: "36px", borderRadius: "50%", background: "linear-gradient(135deg, #8b5cf6, #4f46e5)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "14px", fontWeight: "bold" }}>
-              {squad?.name?.charAt(0) || "S"}
-            </div>
-            <div style={{ display: "flex", flexDirection: "column" }}>
-              <span style={{ fontSize: "15px", fontWeight: "600" }}>{squad?.name || "Squad Chat"}</span>
-              <span style={{ fontSize: "11px", color: "#4ade80" }}>{members.length} online</span>
-            </div>
-          </div>
-          <div style={{ display: "flex", gap: "16px", color: "rgba(168, 85, 247, 0.5)" }}>
-            <Video size={18} style={{ cursor: "pointer" }} />
-            <Phone size={18} style={{ cursor: "pointer" }} />
-          </div>
-        </div>
-
-        {/* Messages Container */}
-        <div ref={chatContainerRef} style={{ flex: 1, overflowY: "auto", padding: "24px", display: "flex", flexDirection: "column" }}>
-          {messages.length === 0 ? (
-            <div style={{ margin: "auto", textAlign: "center", color: "rgba(255,255,255,0.5)" }}>
-              <Hash size={48} style={{ margin: "0 auto 16px", opacity: 0.2 }} />
-              <h3>Welcome to #{squad?.name || "Squad Chat"}</h3>
-              <p style={{ fontSize: "12px" }}>Say hello to your squad mates!</p>
-            </div>
-          ) : (
-            groupedMessages.map((group) => (
-              <div key={group.date} style={{ display: "flex", flexDirection: "column" }}>
-                <div style={{ textAlign: "center", margin: "24px 0" }}>
-                  <span style={{ fontSize: "10px", fontWeight: "bold", textTransform: "uppercase", backgroundColor: "rgba(26, 21, 48, 0.8)", padding: "4px 12px", borderRadius: "12px", color: "rgba(168, 85, 247, 0.5)" }}>
-                    {group.date}
-                  </span>
-                </div>
-
-                {groupBySender(group.msgs).map((senderGroup, gIdx) => {
-                  const isMe = senderGroup.sender === walletAddress;
-                  const firstMsg = senderGroup.messages[0];
-
-                  return (
-                    <div key={`${senderGroup.sender}-${gIdx}`} style={{ display: "flex", flexDirection: isMe ? "row-reverse" : "row", gap: "12px", marginBottom: "16px", width: "100%" }}>
-                      
-                      <div style={{ width: "32px", height: "32px", borderRadius: "50%", background: getAvatarColor(senderGroup.sender), flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "11px", fontWeight: "bold", marginTop: "4px" }}>
-                        {senderGroup.sender.slice(2, 4).toUpperCase()}
-                      </div>
-
-                      <div style={{ display: "flex", flexDirection: "column", maxWidth: "75%", alignItems: isMe ? "flex-end" : "flex-start" }}>
-                        <div style={{ display: "flex", flexDirection: isMe ? "row-reverse" : "row", alignItems: "baseline", gap: "8px", marginBottom: "4px" }}>
-                          <span style={{ fontSize: "12px", fontWeight: "600", color: "rgba(255,255,255,0.8)" }}>{shortenWallet(senderGroup.sender)}</span>
-                          <span style={{ fontSize: "10px", color: "rgba(255,255,255,0.3)" }}>{formatTime(firstMsg.created_at)}</span>
-                        </div>
-
-                        <div style={{ display: "flex", flexDirection: "column", gap: "4px", alignItems: isMe ? "flex-end" : "flex-start" }}>
-                          {senderGroup.messages.map((msg, mIdx) => (
-                            <div key={msg.id} style={{ padding: "10px 14px", backgroundColor: isMe ? "rgba(139, 92, 246, 0.2)" : "rgba(30, 22, 64, 0.9)", border: isMe ? "1px solid rgba(139, 92, 246, 0.3)" : "1px solid rgba(255,255,255,0.05)", borderRadius: "16px", borderTopLeftRadius: isMe || mIdx > 0 ? "16px" : "4px", borderTopRightRadius: !isMe || mIdx > 0 ? "16px" : "4px", fontSize: "14px", color: "#f8fafc", wordBreak: "break-word", whiteSpace: "pre-wrap", lineHeight: "1.5" }}>
-                              {msg.content}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ))
-          )}
-          <div ref={messagesEndRef} />
-        </div>
-
-        {/* Input Field */}
-        <div style={{ flexShrink: 0, padding: "16px 24px", backgroundColor: "#0d0a1a" }}>
-          <div style={{ display: "flex", flexDirection: "row", alignItems: "flex-end", backgroundColor: "rgba(21, 16, 48, 0.6)", border: "1px solid rgba(168, 85, 247, 0.2)", borderRadius: "16px", padding: "8px 16px", gap: "12px" }}>
-            <textarea
-              value={newMessage}
-              onChange={(e) => setNewMessage(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Send a message..."
-              rows={1}
-              style={{ flex: 1, backgroundColor: "transparent", border: "none", outline: "none", color: "white", fontSize: "14px", resize: "none", padding: "6px 0", minHeight: "24px", maxHeight: "120px" }}
-              onInput={(e) => {
-                const target = e.target as HTMLTextAreaElement;
-                target.style.height = "auto";
-                target.style.height = Math.min(target.scrollHeight, 120) + "px";
-              }}
-            />
-            <div style={{ display: "flex", flexDirection: "row", gap: "8px", paddingBottom: "4px", flexShrink: 0 }}>
-              <button style={{ background: "none", border: "none", color: "rgba(168, 85, 247, 0.4)", cursor: "pointer" }}><Paperclip size={18} /></button>
-              <button style={{ background: "none", border: "none", color: "rgba(168, 85, 247, 0.4)", cursor: "pointer" }}><Smile size={18} /></button>
-              <button onClick={handleSend} disabled={sending || !newMessage.trim()} style={{ background: "none", border: "none", color: sending || !newMessage.trim() ? "rgba(168, 85, 247, 0.2)" : "#a855f7", cursor: sending || !newMessage.trim() ? "not-allowed" : "pointer", marginLeft: "4px" }}>
-                {sending ? <Loader2 size={18} className="animate-spin" /> : <Star size={18} />}
-              </button>
-            </div>
-          </div>
-        </div>
       </div>
     </div>
   );
