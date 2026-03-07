@@ -155,6 +155,43 @@ app.get('/health', (_req, res) => {
   res.json({ ok: true });
 });
 
+// ─── SPOTIFY AUTHENTICATION ENDPOINTS ───────────────────────────────────────
+
+app.get('/auth-url-global', (req, res) => {
+  if (!process.env.SPOTIFY_CLIENT_ID || !process.env.SPOTIFY_REDIRECT_URI) {
+    return res.status(500).json({ error: "Spotify credentials missing in backend .env" });
+  }
+
+  const params = new URLSearchParams({
+    response_type: 'code',
+    client_id: process.env.SPOTIFY_CLIENT_ID,
+    scope: 'user-top-read',
+    redirect_uri: process.env.SPOTIFY_REDIRECT_URI,
+    state: 'global' // Tells the callback this is a global verification
+  });
+
+  res.json({ url: `https://accounts.spotify.com/authorize?${params.toString()}` });
+});
+
+app.get('/auth-url', (req, res) => {
+  const { eventId, artistName } = req.query;
+  
+  if (!process.env.SPOTIFY_CLIENT_ID || !process.env.SPOTIFY_REDIRECT_URI) {
+    return res.status(500).json({ error: "Spotify credentials missing in backend .env" });
+  }
+
+  const params = new URLSearchParams({
+    response_type: 'code',
+    client_id: process.env.SPOTIFY_CLIENT_ID,
+    scope: 'user-top-read',
+    redirect_uri: process.env.SPOTIFY_REDIRECT_URI,
+    // Pass the specific concert data in the state
+    state: JSON.stringify({ eventId, artistName }) 
+  });
+
+  res.json({ url: `https://accounts.spotify.com/authorize?${params.toString()}` });
+});
+
 app.post('/api/create-squad', async (req, res) => {
   try {
     const { squadId, concertId, concertName } = req.body || {};
