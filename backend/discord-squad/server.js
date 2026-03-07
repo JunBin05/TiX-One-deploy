@@ -26,7 +26,6 @@ const {
 const axios = require('axios');
 const { Duffel } = require('@duffel/api');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-const { concerts } = require('../../src/data/concerts');
 
 // Duffel client — initialised once; safe to call before .env is validated.
 const duffel = new Duffel({ token: process.env.DUFFEL_ACCESS_TOKEN || '' });
@@ -369,7 +368,17 @@ app.post('/api/create-squad', async (req, res) => {
     // 💥 Generate the very first AI Icebreaker dynamically!
     if (genAI && concertId) {
       try {
-        const concert = concerts.find((c) => c.id === concertId);
+        // Fetch the concert dynamically from Supabase
+        const { data: concert, error: dbErr } = await supabase
+          .from('concerts')
+          .select('*')
+          .eq('id', concertId)
+          .single();
+
+        if (dbErr || !concert) {
+           console.warn(`[db] ConcertID ${concertId} not found in Supabase! Error:`, dbErr);
+        }
+
         if (concert) {
           const rawPrompt = fs.readFileSync(path.join(__dirname, 'prompt.md'), 'utf8');
           const systemInstruction = rawPrompt
@@ -847,11 +856,22 @@ client.on('messageCreate', async (message) => {
     const topic    = message.channel.topic || '';
     const idMatch  = topic.match(/ConcertID:\s*(\S+)/);
     const concertId = idMatch ? idMatch[1] : null;
-    const concert   = concertId ? concerts.find((c) => c.id === concertId) : null;
+    let concert = null;
+    if (concertId) {
+      const { data, error } = await supabase
+        .from('concerts')
+        .select('*')
+        .eq('id', concertId)
+        .single();
+        
+      if (!error && data) {
+        concert = data;
+      }
+    }
 
     if (!concert) {
-      console.warn(`[ai] No concert found for ConcertID=${concertId} in #${message.channel.name}`);
-      return;
+      console.warn(`[ai] No concert found in Supabase for ConcertID=${concertId} in #${message.channel.name}`);
+      return; // Stop the bot if the DB lookup fails
     }
 
     // Build system prompt from prompt.md + concert details.
