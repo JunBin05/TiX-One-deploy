@@ -21,6 +21,10 @@ export const LISTING_REGISTRY_ID =
 export const TICKET_LISTED_EVENT =
   `${PACKAGE_ID}::ticket::TicketListedEvent` as const;
 
+// Waitlist events
+export const WAITLIST_FULFILLED_EVENT =
+  `${PACKAGE_ID}::ticket::WaitlistFulfilled` as const;
+
 // Scanner / admin
 export const ADMIN_CAP_ID =
   "0x2b7b448813f9a4dba20fd3ef2b545994da98e3c7643089fddf6e23f622b4f39d" as const;
