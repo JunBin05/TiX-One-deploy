@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useCurrentAccount, useSuiClient } from "@mysten/dapp-kit";
 import { Gift } from "lucide-react";
 import { WAITLIST_FULFILLED_EVENT } from "../onechain/config";
@@ -14,13 +14,22 @@ type WaitlistFulfillment = {
 export function WaitlistFulfillmentListener() {
   const currentAccount = useCurrentAccount();
   const suiClient = useSuiClient();
+  const mountTime = useRef(Date.now());
 
   const [fulfillment, setFulfillment] = useState<WaitlistFulfillment | null>(null);
   const [ticketData, setTicketData] = useState<any>(null);
   const [isLoadingTicket, setIsLoadingTicket] = useState(false);
   const [seenEvents, setSeenEvents] = useState<Set<string>>(new Set());
 
-  // Poll for WaitlistFulfilled events every 3 seconds
+  useEffect(() => {
+    mountTime.current = Date.now();
+    setSeenEvents(new Set());
+    setFulfillment(null);
+    setTicketData(null);
+  }, [currentAccount?.address]);
+
+  // Poll for WaitlistFulfilled events every 3 seconds.
+  // Ignore events that happened before this component mounted.
   useEffect(() => {
     if (!currentAccount?.address) return;
 
@@ -34,7 +43,15 @@ export function WaitlistFulfillmentListener() {
 
         for (const event of events.data || []) {
           const eventData: any = (event as any).parsedJson;
-          const eventId = (event as any).id?.txDigest + (event as any).id?.eventSeq;
+          const eventTimestamp = Number((event as any).timestampMs || 0);
+
+          // Skip historical events from before/at page load to prevent ghost popups after refresh.
+          if (!Number.isFinite(eventTimestamp) || eventTimestamp <= mountTime.current) {
+            continue;
+          }
+
+          const eventId = `${(event as any).id?.txDigest || ""}:${(event as any).id?.eventSeq || ""}`;
+          if (!eventId || eventId === ":") continue;
 
           // Check if this event is for current user and we haven't seen it
           if (
@@ -189,7 +206,10 @@ export function WaitlistFulfillmentListener() {
         </div>
 
         <button
-          onClick={() => setFulfillment(null)}
+          onClick={() => {
+            setFulfillment(null);
+            window.location.assign("/my-ticket");
+          }}
           style={{
             width: "100%",
             borderRadius: "12px",
